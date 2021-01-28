@@ -1,3 +1,5 @@
+[![codecov](https://codecov.io/gh/matt-lewandowski/task/branch/main/graph/badge.svg?token=GHTD4J5BQL)](https://codecov.io/gh/matt-lewandowski/task)
+
 # task
 Task workers are useful for handling large, simple, repetitive jobs concurrently.
 ## Installation
