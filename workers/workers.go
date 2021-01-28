@@ -1,4 +1,4 @@
-package workGroup
+package workers
 
 import (
 	"github.com/matt-lewandowski/tasks/internal/limiter"
@@ -10,10 +10,9 @@ import (
 	"syscall"
 )
 
-// A WorkGroup will process any number of tasks in parallel. Limited by the provided RPS and workers parameters
 type WorkGroup interface {
-	Start()
-	Stop()
+Start()
+Stop()
 }
 
 // JobData is passed the the results and error handlers

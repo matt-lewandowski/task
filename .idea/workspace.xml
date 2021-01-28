@@ -11,7 +11,7 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="605fe38f-5f01-4035-b392-316aab33ae21" name="Default Changelist" comment="">
-      <change afterPath="$PROJECT_DIR$/cmd/taskHandler.go" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/../tasks/cmd/taskHandler.go" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/../example-go-grpc-server" beforeDir="false" afterPath="$PROJECT_DIR$/../example-go-grpc-server" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/../example-go-react-macos-app-1" beforeDir="false" afterPath="$PROJECT_DIR$/../example-go-react-macos-app-1" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/../open-by-default/internal/itemconst/const.go" beforeDir="false" />
