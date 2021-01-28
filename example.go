@@ -24,7 +24,7 @@ func main() {
 	// resulting functions will not be called.
 	workerFunction := func(task interface{}) (interface{}, error) {
 		fmt.Println(fmt.Sprintf("Finished working on %v", task))
-		time.Sleep(5 * time.Second)
+		time.Sleep(2 * time.Second)
 		// For the sake of the example, we a different value to the return function, and an error for the
 		// error function to catch.
 		returnValue := fmt.Sprintf("%v completed", task.(string))
@@ -37,11 +37,12 @@ func main() {
 	// the function handler, the workers will complete their task at hand, and then stop. This function is synchronous
 	// and only one error can be handled at a time.
 	errorFunction := func(result workers.JobData, stop func()) {
-		// An example if killing the process, if a specified error is received
-		if result.Error.Error() == "Job-455 completed" {
+		// An example if killing the process, if a specified error is received. It will stop creating new jobs,
+		// but the old jobs will finish. So it will go ~100 more since we have so many workers that need to finish
+		if result.Error.Error() == "Job-455 completed error" {
 			stop()
+			fmt.Println("ERROR: Stopping the job")
 		}
-		fmt.Println("ERROR: Stopping the job")
 	}
 
 	// The resultFunction will be called when the worker function finishes a task, and returns a result.
@@ -55,7 +56,7 @@ func main() {
 	// The Workers is the maximum amount of concurrent jobs being handled at a given time.
 	// The RateLimit is the maximum amount of new workers being spawned off between each second.
 	// It is important to have more workers then RateLimit if each task might take over 1 second
-	// to process. This example task takes 5 seconds to process
+	// to process. This example task takes 2 seconds to process
 	task := workers.NewTask(workers.Config{
 		Workers:         250,
 		RateLimit:       50,

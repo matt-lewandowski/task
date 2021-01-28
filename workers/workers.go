@@ -10,7 +10,7 @@ import (
 	"syscall"
 )
 
-type WorkGroup interface {
+type Task interface {
 Start()
 Stop()
 }
@@ -30,7 +30,7 @@ type JobData struct {
 	Count    int
 }
 
-type workgroup struct {
+type task struct {
 	workers         safe.Integer
 	limiter         limiter.Limiter
 	jobs            chan interface{}
@@ -72,8 +72,8 @@ type Config struct {
 	ResultHandler func(data JobData)
 }
 
-// NewWorkerGroup will return WorkGroup which will process jobs concurrently with the provided handler function
-func NewWorkerGroup(c Config) WorkGroup {
+// NewTask will return a Task which will process jobs concurrently with the provided handler function
+func NewTask(c Config) Task {
 	l := limiter.NewLimiter(limiter.Config{RPS: c.RateLimit})
 	s := make(chan os.Signal)
 	rc := make(chan JobData)
@@ -81,7 +81,7 @@ func NewWorkerGroup(c Config) WorkGroup {
 	i := safe.NewInteger(c.Workers)
 	clk := clock.NewClock()
 	signal.Notify(s, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
-	wg := workgroup{
+	wg := task{
 		workers:         i,
 		limiter:         l,
 		handlerFunction: c.HandlerFunction,
@@ -97,12 +97,12 @@ func NewWorkerGroup(c Config) WorkGroup {
 }
 
 // Stop will stop creating new jobs and wait for any jobs in progress to finish
-func (w *workgroup) Stop() {
+func (w *task) Stop() {
 	w.stop <- os.Interrupt
 }
 
 // Start will begin processing the jobs provided
-func (w *workgroup) Start() {
+func (w *task) Start() {
 	flushGroup := sync.WaitGroup{}
 	done := make(chan bool)
 	go func() {
@@ -118,7 +118,7 @@ func (w *workgroup) Start() {
 	w.limiter.Stop()
 }
 
-func (w *workgroup) start(flushGroup *sync.WaitGroup) {
+func (w *task) start(flushGroup *sync.WaitGroup) {
 	flushGroup.Add(1)
 	go errorHandler(flushGroup, w.errorChannel, w.Stop, w.errorHandler)
 	flushGroup.Add(1)
@@ -154,7 +154,7 @@ func (w *workgroup) start(flushGroup *sync.WaitGroup) {
 }
 
 // loadJobs will create a buffered channel containing each job
-func (w *workgroup) loadJobs(jobs []interface{}) {
+func (w *task) loadJobs(jobs []interface{}) {
 	j := make(chan interface{}, len(jobs))
 	for _, job := range jobs {
 		j <- job
@@ -163,7 +163,7 @@ func (w *workgroup) loadJobs(jobs []interface{}) {
 	close(w.jobs)
 }
 
-func (w *workgroup) work(workerStops chan bool, waitGroup *sync.WaitGroup) {
+func (w *task) work(workerStops chan bool, waitGroup *sync.WaitGroup) {
 	count := 0
 	for len(w.jobs) > 0 && len(workerStops) == 0 {
 		numberOfJobs := <-w.limiter.JobsChannel()
@@ -180,7 +180,7 @@ func (w *workgroup) work(workerStops chan bool, waitGroup *sync.WaitGroup) {
 	waitGroup.Done()
 }
 
-func (w *workgroup) receiveJob(waitGroup *sync.WaitGroup, workerStops chan bool, count int) {
+func (w *task) receiveJob(waitGroup *sync.WaitGroup, workerStops chan bool, count int) {
 	select {
 	case job := <-w.jobs:
 		if job != nil {
