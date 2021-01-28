@@ -17,7 +17,8 @@ type Limiter interface {
 }
 
 type Config struct {
-	RPS int
+	RPS   int
+	Clock clock.Clock
 }
 
 type limiter struct {
@@ -32,10 +33,9 @@ type limiter struct {
 func NewLimiter(c Config) Limiter {
 	done := make(chan bool)
 	jobsReady := make(chan int, 1)
-	clk := clock.NewClock()
 	l := limiter{
 		mutex:     &sync.Mutex{},
-		clock:     clk,
+		clock:     c.Clock,
 		rps:       c.RPS,
 		done:      done,
 		jobsReady: jobsReady,

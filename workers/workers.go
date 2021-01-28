@@ -11,8 +11,8 @@ import (
 )
 
 type Task interface {
-Start()
-Stop()
+	Start()
+	Stop()
 }
 
 // JobData is passed the the results and error handlers
@@ -21,13 +21,13 @@ type JobData struct {
 	JobValue interface{}
 
 	// The Result from a job if it is successful
-	Result   interface{}
+	Result interface{}
 
 	// The Error from a job if it is not successful
-	Error    error
+	Error error
 
 	// The Count is the number of jobs that have been done
-	Count    int
+	Count int
 }
 
 type task struct {
@@ -74,7 +74,10 @@ type Config struct {
 
 // NewTask will return a Task which will process jobs concurrently with the provided handler function
 func NewTask(c Config) Task {
-	l := limiter.NewLimiter(limiter.Config{RPS: c.RateLimit})
+	l := limiter.NewLimiter(limiter.Config{
+		RPS:   c.RateLimit,
+		Clock: clock.NewClock(),
+	})
 	s := make(chan os.Signal)
 	rc := make(chan JobData)
 	ec := make(chan JobData)
