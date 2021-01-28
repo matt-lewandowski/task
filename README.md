@@ -1,5 +1,6 @@
 [![codecov](https://codecov.io/gh/matt-lewandowski/task/branch/main/graph/badge.svg?token=GHTD4J5BQL)](https://codecov.io/gh/matt-lewandowski/task)
-
+[![Build Status](https://travis-ci.com/matt-lewandowski/task.svg?branch=main)](https://travis-ci.com/matt-lewandowski/task)
+[![contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat)](https://github.com/dwyl/esta/issues)
 # task
 Task workers are useful for handling large, simple, repetitive jobs concurrently.
 ## Installation
