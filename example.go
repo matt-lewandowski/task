@@ -3,7 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
-	"github.com/matt-lewandowski/tasks/workers"
+	"github.com/matt-lewandowski/task/workers"
 	"time"
 )
 

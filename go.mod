@@ -1,3 +1,3 @@
-module github.com/matt-lewandowski/tasks
+module github.com/matt-lewandowski/task
 
 go 1.14

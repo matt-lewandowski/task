@@ -1,9 +1,9 @@
 package workers
 
 import (
-	"github.com/matt-lewandowski/tasks/internal/limiter"
-	"github.com/matt-lewandowski/tasks/internal/limiter/clock"
-	"github.com/matt-lewandowski/tasks/internal/safe"
+	"github.com/matt-lewandowski/task/internal/limiter"
+	"github.com/matt-lewandowski/task/internal/limiter/clock"
+	"github.com/matt-lewandowski/task/internal/safe"
 	"os"
 	"os/signal"
 	"sync"
