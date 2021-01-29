@@ -146,8 +146,6 @@ func (w *task) start(flushGroup *sync.WaitGroup) {
 			for {
 				select {
 				case workerStops <- true:
-				default:
-					break
 				}
 				break
 			}
@@ -204,15 +202,10 @@ func (w *task) receiveJob(waitGroup *sync.WaitGroup, workerStops chan bool, coun
 					Count:    count,
 				}
 			}
-		} else {
-			w.Stop()
 		}
 		waitGroup.Done()
 		w.workers.Increment()
 	case <-workerStops:
-		waitGroup.Done()
-		return
-	default:
 		waitGroup.Done()
 		return
 	}

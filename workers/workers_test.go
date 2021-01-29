@@ -24,6 +24,24 @@ func TestNewTask(t *testing.T) {
 		handlerFunction func(interface{}) (interface{}, error)
 	}{
 		{
+			name:      "stop the job from the error handler",
+			jobs:      createJobs("Cancel Me"),
+			workers:   20,
+			rateLimit: 100,
+			handlerFunction: func(i interface{}) (interface{}, error) {
+				return i, fmt.Errorf(i.(string))
+			},
+		},
+		{
+			name:      "create a job of nil values",
+			jobs:      createJobs(nil),
+			workers:   20,
+			rateLimit: 100,
+			handlerFunction: func(i interface{}) (interface{}, error) {
+				return i, nil
+			},
+		},
+		{
 			name:      "sends errors to error function",
 			jobs:      createJobs("Test Error"),
 			workers:   20,
@@ -87,7 +105,14 @@ func TestNewTask(t *testing.T) {
 				}
 			}
 			errorFunction := func(data JobData, stop func()) {
-				if data.Error != nil && data.Error.Error() != "Test Error" {
+				if data.Error.Error() == "Cancel Me" {
+					stop()
+					return
+				}
+				if data.Error.Error() == "Test Error" {
+					return
+				}
+				if data.Error != nil {
 					t.Fatalf("ERROR: %v", data.Error)
 				}
 			}
@@ -104,7 +129,66 @@ func TestNewTask(t *testing.T) {
 				time.Sleep(time.Second * 1)
 				abort <- true
 			}()
-			go worker.Start()
+			go func() {
+				worker.Start()
+				abort <- false
+			}()
+
+			aborted := <-abort
+
+			if aborted {
+				t.Error("ERROR: Test did not finish in time. Test aborted")
+				worker.Stop()
+			}
+		})
+	}
+}
+
+func TestTask_Stop(t *testing.T) {
+	tests := []struct {
+		name            string
+		jobs            []interface{}
+		workers         int
+		rateLimit       int
+		handlerFunction func(interface{}) (interface{}, error)
+		errorFunction   func(data JobData, stop func())
+	}{
+		{
+			name:            "The job will stop properly",
+			jobs:            createJobs("Cancel Me"),
+			workers:         20,
+			rateLimit:       1,
+			handlerFunction: func(i interface{}) (interface{}, error) { return nil, nil },
+			errorFunction:   func(data JobData, stop func()) {},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			abort := make(chan bool)
+			resultFunction := func(data JobData) {
+				if data.Count == 2 {
+					abort <- true
+				}
+			}
+			errorFunction := func(data JobData, stop func()) {}
+			worker := NewTask(Config{
+				Workers:         test.workers,
+				RateLimit:       test.rateLimit,
+				Jobs:            test.jobs,
+				HandlerFunction: test.handlerFunction,
+				ErrorHandler:    errorFunction,
+				ResultHandler:   resultFunction,
+			})
+
+			go func() {
+				time.Sleep(time.Second * 2)
+				abort <- true
+			}()
+			go func() {
+				worker.Start()
+				abort <- false
+			}()
+			worker.Stop()
 
 			aborted := <-abort
 
