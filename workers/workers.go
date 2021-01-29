@@ -10,6 +10,7 @@ import (
 	"syscall"
 )
 
+// Task is the interface for the task runner
 type Task interface {
 	Start()
 	Stop()
@@ -43,6 +44,7 @@ type task struct {
 	clock           clock.Clock
 }
 
+// Config is the struct for creating a new task runner
 type Config struct {
 	// Workers is the desired amount of concurrent processes. Each worker will consume a job which will
 	// use the handler function to process it.
@@ -81,7 +83,7 @@ func NewTask(c Config) Task {
 	s := make(chan os.Signal)
 	rc := make(chan JobData)
 	ec := make(chan JobData)
-	pc := safe.NewProgressCounter(c.Workers)
+	pc := safe.NewProgressCounter(c.Workers, len(c.Jobs))
 	clk := clock.NewClock()
 	signal.Notify(s, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
 	wg := task{
@@ -127,7 +129,7 @@ func (w *task) start(flushGroup *sync.WaitGroup) {
 	flushGroup.Add(1)
 	go resultHandler(flushGroup, w.resultsChannel, w.resultHandler)
 
-	workerStops := make(chan bool, w.workers.GetCount())
+	workerStops := make(chan bool, w.workers.GetAvailableWorkers())
 	waitGroup := sync.WaitGroup{}
 	waitGroup.Add(1)
 	go w.work(workerStops, &waitGroup)
@@ -171,7 +173,7 @@ func (w *task) work(workerStops chan bool, waitGroup *sync.WaitGroup) {
 	for len(w.jobs) > 0 && len(workerStops) == 0 {
 		numberOfJobs := <-w.limiter.SlotsAvailable()
 		for i := 0; i < numberOfJobs; i++ {
-			if w.workers.GetCount() > 0 && len(w.jobs) > 0 && len(workerStops) == 0 {
+			if w.workers.GetAvailableWorkers() > 0 && w.workers.GetJobsToDo() > 0 && len(workerStops) == 0 {
 				w.workers.Decrement()
 				waitGroup.Add(1)
 				w.limiter.Record(w.clock.Now())

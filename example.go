@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"github.com/matt-lewandowski/task/workers"
 	"time"
@@ -30,7 +29,7 @@ func main() {
 		// For the sake of the example, we a different value to the return function, and an error for the
 		// error function to catch.
 		returnValue := fmt.Sprintf("%v completed", task.(string))
-		errValue := errors.New(fmt.Sprintf("%v error", returnValue))
+		errValue := fmt.Errorf("%v error", returnValue)
 		return returnValue, errValue
 	}
 

@@ -2,55 +2,74 @@ package safe
 
 import "sync"
 
+// ProgressCounter is a thread safe counter that will also keep track of
+// the total number of increments
 type ProgressCounter interface {
 	Increment()
 	Decrement()
 	Reset()
-	GetCount() int
-	GetIncrementTotal() int
+	GetAvailableWorkers() int
+	GetJobsAccepted() int
+	GetJobsToDo() int
 }
 
 type progressCounter struct {
-	mutex          sync.Mutex
-	count          int
-	incrementTotal int
+	mutex        sync.Mutex
+	workerCount  int
+	jobsAccepted int
+	jobsToDo     int
 }
 
-func NewProgressCounter(count int) ProgressCounter {
+// NewProgressCounter will return a thread safe counter
+func NewProgressCounter(workerCount int, jobCount int) ProgressCounter {
 	return &progressCounter{
-		mutex:          sync.Mutex{},
-		count:          count,
-		incrementTotal: 0,
+		mutex:        sync.Mutex{},
+		workerCount:  workerCount,
+		jobsAccepted: 0,
+		jobsToDo:     jobCount,
 	}
 }
 
+// Increment will increment the workerCount and total by 1
 func (i *progressCounter) Increment() {
 	i.mutex.Lock()
 	defer i.mutex.Unlock()
-	i.count++
-	i.incrementTotal++
+	i.workerCount++
+	i.jobsAccepted++
 }
 
+// Decrement will subtract 1 from the workerCount
 func (i *progressCounter) Decrement() {
 	i.mutex.Lock()
 	defer i.mutex.Unlock()
-	i.count--
+	i.workerCount--
+	i.jobsToDo--
 }
 
+// Reset will set the workerCount to 0
 func (i *progressCounter) Reset() {
 	i.mutex.Lock()
 	defer i.mutex.Unlock()
-	i.count = 0
+	i.workerCount = 0
 }
 
-func (i *progressCounter) GetCount() int {
+// GetAvailableWorkers will return the current workerCount
+func (i *progressCounter) GetAvailableWorkers() int {
 	i.mutex.Lock()
 	defer i.mutex.Unlock()
-	return i.count
+	return i.workerCount
 }
 
-func (i *progressCounter) GetIncrementTotal() int {
+// GetJobsToDo will return the amount of jobs that are left
+func (i *progressCounter) GetJobsToDo() int {
 	i.mutex.Lock()
 	defer i.mutex.Unlock()
-	return i.incrementTotal
+	return i.jobsToDo
+}
+
+// GetJobsAccepted will return the total number of increments
+func (i *progressCounter) GetJobsAccepted() int {
+	i.mutex.Lock()
+	defer i.mutex.Unlock()
+	return i.jobsAccepted
 }

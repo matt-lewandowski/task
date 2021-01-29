@@ -15,13 +15,13 @@ func TestNewLimiter(t *testing.T) {
 		name       string
 		rps        int
 		timestamps []time.Time
-		clockMock  func(c *mock.MockClock)
+		clockMock  func(c *mock.Clock)
 		validator  func(t *testing.T, l limiter.Limiter)
 	}{
 		{
 			name: "create a new limiter with no records",
 			rps:  10,
-			clockMock: func(c *mock.MockClock) {
+			clockMock: func(c *mock.Clock) {
 				c.On("Now").Return(time.Now())
 			},
 			validator: func(t *testing.T, l limiter.Limiter) {
@@ -39,7 +39,7 @@ func TestNewLimiter(t *testing.T) {
 				time.Now().Add(1 * time.Hour),
 				time.Now().Add(1 * time.Hour),
 			},
-			clockMock: func(c *mock.MockClock) {
+			clockMock: func(c *mock.Clock) {
 				c.On("Now").Return(time.Now())
 			},
 			validator: func(t *testing.T, l limiter.Limiter) {
@@ -57,7 +57,7 @@ func TestNewLimiter(t *testing.T) {
 				time.Now().Add(1 * time.Hour),
 				time.Now().Add(1 * time.Hour),
 			},
-			clockMock: func(c *mock.MockClock) {
+			clockMock: func(c *mock.Clock) {
 				c.On("Now").Return(time.Now())
 			},
 			validator: func(t *testing.T, l limiter.Limiter) {
@@ -71,18 +71,20 @@ func TestNewLimiter(t *testing.T) {
 		},
 	}
 	for _, test := range tests {
-		clock := mock.MockClock{}
-		if test.clockMock != nil {
-			test.clockMock(&clock)
-		}
-		l := limiter.NewLimiter(limiter.Config{
-			RPS:   test.rps,
-			Clock: &clock,
+		t.Run(test.name, func(t *testing.T) {
+			clock := mock.Clock{}
+			if test.clockMock != nil {
+				test.clockMock(&clock)
+			}
+			l := limiter.NewLimiter(limiter.Config{
+				RPS:   test.rps,
+				Clock: &clock,
+			})
+			for _, entry := range test.timestamps {
+				l.Record(entry)
+			}
+			test.validator(t, l)
+			l.Stop()
 		})
-		for _, entry := range test.timestamps {
-			l.Record(entry)
-		}
-		test.validator(t, l)
-		l.Stop()
 	}
 }
