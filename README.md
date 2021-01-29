@@ -1,4 +1,5 @@
 [![codecov](https://codecov.io/gh/matt-lewandowski/task/branch/main/graph/badge.svg?token=GHTD4J5BQL)](https://codecov.io/gh/matt-lewandowski/task)
+[![Go Report Card](https://goreportcard.com/badge/github.com/matt-lewandowski/task)](https://goreportcard.com/report/github.com/matt-lewandowski/task)
 [![Build Status](https://travis-ci.com/matt-lewandowski/task.svg?branch=main)](https://travis-ci.com/matt-lewandowski/task)
 [![contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat)](https://github.com/dwyl/esta/issues)
 # task
@@ -14,7 +15,7 @@ Three functions need to be passed in when creating a task worker
 workerFunction := func(task interface{}) (interface{}, error) {
 		fmt.Println(fmt.Sprintf("Finished working on %v", task))
 		returnValue := fmt.Sprintf("%v completed", task.(string))
-		errValue := errors.New(fmt.Sprintf("%v error", returnValue))
+		errValue := fmt.Errorf("%v error", returnValue)
 		return returnValue, errValue
 	}
 ```
