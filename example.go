@@ -8,7 +8,9 @@ import (
 )
 
 func main() {
-	const (amountOfJobToDo = 1000)
+	const (
+		amountOfJobToDo = 1000
+	)
 
 	// Create a slice of tasks as an interface. I hope to replace this with generics
 	// but for now, interfaces and type casting will do

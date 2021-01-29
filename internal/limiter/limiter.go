@@ -10,14 +10,23 @@ const (
 	nanosecondsInSecond = 1000000000
 )
 
+// A Limiter is for controlling the requests per second
 type Limiter interface {
+	// Stop will close any channels and stop calculating the RPS
 	Stop()
-	JobsChannel() chan int
+	// SlotsAvailable will return an integer over a buffered channel of how many requests are
+	// allowed to happen
+	SlotsAvailable() chan int
+	// Record will record a timestamp that will be used to determine how many slots are available.
+	// Each request that uses an available slot should call request
 	Record(timestamp time.Time)
 }
 
+// The Config is the values needed for creating a limiter
 type Config struct {
-	RPS   int
+	// RPS is the desired requests per second that will be allowed
+	RPS int
+	// Clock is just a stubbed Time, for testing purposes
 	Clock clock.Clock
 }
 
@@ -30,6 +39,7 @@ type limiter struct {
 	rps       int
 }
 
+// NewLimiter will return a Limiter interface
 func NewLimiter(c Config) Limiter {
 	done := make(chan bool)
 	jobsReady := make(chan int, 1)
@@ -43,6 +53,25 @@ func NewLimiter(c Config) Limiter {
 	}
 	l.init()
 	return &l
+}
+
+// Record will record a timestamp into the rate limiter
+func (l *limiter) Record(timestamp time.Time) {
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+	l.entries = append(l.entries, timestamp.UnixNano())
+}
+
+// Stop will close channels
+func (l *limiter) Stop() {
+	l.done <- true
+	close(l.jobsReady)
+	close(l.done)
+}
+
+// SlotsAvailable will return the channel that will receive the amount of jobs ready
+func (l *limiter) SlotsAvailable() chan int {
+	return l.jobsReady
 }
 
 func (l *limiter) init() {
@@ -82,29 +111,6 @@ func (l *limiter) calculateAllowance() {
 
 	rate := l.rps - second
 	if rate > 0 {
-		select {
-		case l.jobsReady <- rate:
-		default:
-			return
-		}
+		l.jobsReady <- rate
 	}
-}
-
-// Record will record a timestamp into the rate limiter
-func (l *limiter) Record(timestamp time.Time) {
-	l.mutex.Lock()
-	defer l.mutex.Unlock()
-	l.entries = append(l.entries, timestamp.UnixNano())
-}
-
-// Stop will close channels
-func (l *limiter) Stop() {
-	l.done <- true
-	close(l.jobsReady)
-	close(l.done)
-}
-
-// JobsChannel will return the channel that will recieve the amount of jobs ready
-func (l *limiter) JobsChannel() chan int {
-	return l.jobsReady
 }

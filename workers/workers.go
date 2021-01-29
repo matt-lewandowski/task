@@ -31,7 +31,7 @@ type JobData struct {
 }
 
 type task struct {
-	workers         safe.Integer
+	workers         safe.ProgressCounter
 	limiter         limiter.Limiter
 	jobs            chan interface{}
 	handlerFunction func(interface{}) (interface{}, error)
@@ -81,11 +81,11 @@ func NewTask(c Config) Task {
 	s := make(chan os.Signal)
 	rc := make(chan JobData)
 	ec := make(chan JobData)
-	i := safe.NewInteger(c.Workers)
+	pc := safe.NewProgressCounter(c.Workers)
 	clk := clock.NewClock()
 	signal.Notify(s, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
 	wg := task{
-		workers:         i,
+		workers:         pc,
 		limiter:         l,
 		handlerFunction: c.HandlerFunction,
 		errorChannel:    ec,
@@ -169,7 +169,7 @@ func (w *task) loadJobs(jobs []interface{}) {
 func (w *task) work(workerStops chan bool, waitGroup *sync.WaitGroup) {
 	count := 0
 	for len(w.jobs) > 0 && len(workerStops) == 0 {
-		numberOfJobs := <-w.limiter.JobsChannel()
+		numberOfJobs := <-w.limiter.SlotsAvailable()
 		for i := 0; i < numberOfJobs; i++ {
 			if w.workers.GetCount() > 0 && len(w.jobs) > 0 && len(workerStops) == 0 {
 				w.workers.Decrement()

@@ -9,12 +9,14 @@ import (
 )
 
 func TestNewLimiter(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name       string
 		rps        int
 		timestamps []time.Time
 		clockMock  func(c *mock.MockClock)
-		validator  func(t *testing.T, allowance int)
+		validator  func(t *testing.T, l limiter.Limiter)
 	}{
 		{
 			name: "create a new limiter with no records",
@@ -22,12 +24,13 @@ func TestNewLimiter(t *testing.T) {
 			clockMock: func(c *mock.MockClock) {
 				c.On("Now").Return(time.Now())
 			},
-			validator: func(t *testing.T, allowance int) {
+			validator: func(t *testing.T, l limiter.Limiter) {
+				allowance := <-l.SlotsAvailable()
 				assert.Equal(t, 10, allowance)
 			},
 		},
 		{
-			name: "create a new limiter with 5 records",
+			name: "should have 5 slots",
 			rps:  10,
 			timestamps: []time.Time{
 				time.Now().Add(1 * time.Hour),
@@ -39,8 +42,31 @@ func TestNewLimiter(t *testing.T) {
 			clockMock: func(c *mock.MockClock) {
 				c.On("Now").Return(time.Now())
 			},
-			validator: func(t *testing.T, allowance int) {
+			validator: func(t *testing.T, l limiter.Limiter) {
+				allowance := <-l.SlotsAvailable()
 				assert.Equal(t, 5, allowance)
+			},
+		},
+		{
+			name: "should have 0 slots available",
+			rps:  5,
+			timestamps: []time.Time{
+				time.Now().Add(1 * time.Hour),
+				time.Now().Add(1 * time.Hour),
+				time.Now().Add(1 * time.Hour),
+				time.Now().Add(1 * time.Hour),
+				time.Now().Add(1 * time.Hour),
+			},
+			clockMock: func(c *mock.MockClock) {
+				c.On("Now").Return(time.Now())
+			},
+			validator: func(t *testing.T, l limiter.Limiter) {
+				select {
+				case <-l.SlotsAvailable():
+					t.Error("limiter should not return when there are no slots available")
+				default:
+					return
+				}
 			},
 		},
 	}
@@ -53,11 +79,10 @@ func TestNewLimiter(t *testing.T) {
 			RPS:   test.rps,
 			Clock: &clock,
 		})
-		for _, entry := range test.timestamps{
+		for _, entry := range test.timestamps {
 			l.Record(entry)
 		}
-		allowance := <-l.JobsChannel()
-		test.validator(t, allowance)
+		test.validator(t, l)
 		l.Stop()
 	}
 }

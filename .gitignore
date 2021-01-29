@@ -1,5 +1,7 @@
 /cmd
 .idea/workspace.xml
 .idea
+
+coverage.out
 coverage.txt
 cover.html
