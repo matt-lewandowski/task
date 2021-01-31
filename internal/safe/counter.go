@@ -2,27 +2,29 @@ package safe
 
 import "sync"
 
-// ProgressCounter is a thread safe counter that will also keep track of
-// the total number of increments
-type ProgressCounter interface {
-	Increment()
-	Decrement()
+// ResourceManager is a thread safe manager that will keep track of jobs
+// and workers
+type ResourceManager interface {
+	FinishJob()
+	AbortedJob()
+	TakeJob()
 	Reset()
 	GetAvailableWorkers() int
-	GetJobsAccepted() int
+	GetWorkersWorking() int
+	GetAllJobsAccepted() int
 	GetJobsToDo() int
 }
 
-type progressCounter struct {
+type manager struct {
 	mutex        sync.Mutex
 	workerCount  int
 	jobsAccepted int
 	jobsToDo     int
 }
 
-// NewProgressCounter will return a thread safe counter
-func NewProgressCounter(workerCount int, jobCount int) ProgressCounter {
-	return &progressCounter{
+// NewResourceManager will return a new ResourceManager
+func NewResourceManager(workerCount int, jobCount int) ResourceManager {
+	return &manager{
 		mutex:        sync.Mutex{},
 		workerCount:  workerCount,
 		jobsAccepted: 0,
@@ -30,16 +32,24 @@ func NewProgressCounter(workerCount int, jobCount int) ProgressCounter {
 	}
 }
 
-// Increment will increment the workerCount and total by 1
-func (i *progressCounter) Increment() {
+// FinishJob will increment the workerCount and total by 1
+func (i *manager) FinishJob() {
 	i.mutex.Lock()
 	defer i.mutex.Unlock()
 	i.workerCount++
 	i.jobsAccepted++
 }
 
-// Decrement will subtract 1 from the workerCount
-func (i *progressCounter) Decrement() {
+// AbortedJob will reverse TakeJob, because the job was never started
+func (i *manager) AbortedJob() {
+	i.mutex.Lock()
+	defer i.mutex.Unlock()
+	i.workerCount++
+	i.jobsToDo++
+}
+
+// TakeJob will subtract 1 from the workerCount
+func (i *manager) TakeJob() {
 	i.mutex.Lock()
 	defer i.mutex.Unlock()
 	i.workerCount--
@@ -47,29 +57,38 @@ func (i *progressCounter) Decrement() {
 }
 
 // Reset will set the workerCount to 0
-func (i *progressCounter) Reset() {
+func (i *manager) Reset() {
 	i.mutex.Lock()
 	defer i.mutex.Unlock()
 	i.workerCount = 0
 }
 
 // GetAvailableWorkers will return the current workerCount
-func (i *progressCounter) GetAvailableWorkers() int {
+func (i *manager) GetAvailableWorkers() int {
 	i.mutex.Lock()
 	defer i.mutex.Unlock()
 	return i.workerCount
 }
 
-// GetJobsToDo will return the amount of jobs that are left
-func (i *progressCounter) GetJobsToDo() int {
+// GetJobsToDo will return the amount of jobs that are left,
+// when a specified amount of jobs has been set
+func (i *manager) GetJobsToDo() int {
 	i.mutex.Lock()
 	defer i.mutex.Unlock()
 	return i.jobsToDo
 }
 
-// GetJobsAccepted will return the total number of increments
-func (i *progressCounter) GetJobsAccepted() int {
+// GetAllJobsAccepted will return the total number of increments
+func (i *manager) GetAllJobsAccepted() int {
 	i.mutex.Lock()
 	defer i.mutex.Unlock()
 	return i.jobsAccepted
+}
+
+// GetWorkersWorking will return the number of workers that have not
+// released their job yet
+func (i *manager) GetWorkersWorking() int {
+	i.mutex.Lock()
+	defer i.mutex.Unlock()
+	return i.workerCount - i.jobsAccepted
 }

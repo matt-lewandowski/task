@@ -25,7 +25,7 @@ func TestNewLimiter(t *testing.T) {
 				c.On("Now").Return(time.Now())
 			},
 			validator: func(t *testing.T, l limiter.Limiter) {
-				allowance := <-l.SlotsAvailable()
+				allowance := <-l.WorkAvailable()
 				assert.Equal(t, 10, allowance)
 			},
 		},
@@ -43,7 +43,7 @@ func TestNewLimiter(t *testing.T) {
 				c.On("Now").Return(time.Now())
 			},
 			validator: func(t *testing.T, l limiter.Limiter) {
-				allowance := <-l.SlotsAvailable()
+				allowance := <-l.WorkAvailable()
 				assert.Equal(t, 5, allowance)
 			},
 		},
@@ -62,7 +62,7 @@ func TestNewLimiter(t *testing.T) {
 			},
 			validator: func(t *testing.T, l limiter.Limiter) {
 				select {
-				case <-l.SlotsAvailable():
+				case <-l.WorkAvailable():
 					t.Error("limiter should not return when there are no slots available")
 				default:
 					return

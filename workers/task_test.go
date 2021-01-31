@@ -116,7 +116,7 @@ func TestNewTask(t *testing.T) {
 					t.Fatalf("ERROR: %v", data.Error)
 				}
 			}
-			worker := NewTask(Config{
+			worker := NewTask(TaskConfig{
 				Workers:         test.workers,
 				RateLimit:       test.rateLimit,
 				Jobs:            test.jobs,
@@ -171,7 +171,7 @@ func TestTask_Stop(t *testing.T) {
 				}
 			}
 			errorFunction := func(data JobData, stop func()) {}
-			worker := NewTask(Config{
+			worker := NewTask(TaskConfig{
 				Workers:         test.workers,
 				RateLimit:       test.rateLimit,
 				Jobs:            test.jobs,

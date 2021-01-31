@@ -13,7 +13,7 @@ func TestNewProgressCounter(t *testing.T) {
 		name         string
 		initialValue int
 		amountOfJobs int
-		useCounter   func(p safe.ProgressCounter)
+		useCounter   func(p safe.ResourceManager)
 		validator    func(t *testing.T, count int, total int, todo int)
 	}{
 		{
@@ -30,9 +30,9 @@ func TestNewProgressCounter(t *testing.T) {
 			name:         "should workerCount up by 10",
 			initialValue: 0,
 			amountOfJobs: 10,
-			useCounter: func(p safe.ProgressCounter) {
+			useCounter: func(p safe.ResourceManager) {
 				for i := 0; i < 10; i++ {
-					p.Increment()
+					p.FinishJob()
 				}
 			},
 			validator: func(t *testing.T, count int, total int, todo int) {
@@ -45,9 +45,9 @@ func TestNewProgressCounter(t *testing.T) {
 			name:         "should workerCount down by 10",
 			initialValue: 10,
 			amountOfJobs: 10,
-			useCounter: func(p safe.ProgressCounter) {
+			useCounter: func(p safe.ResourceManager) {
 				for i := 0; i < 10; i++ {
-					p.Decrement()
+					p.TakeJob()
 				}
 			},
 			validator: func(t *testing.T, count int, total int, todo int) {
@@ -60,12 +60,12 @@ func TestNewProgressCounter(t *testing.T) {
 			name:         "should have a different TotalIncrements and workerCount",
 			initialValue: 0,
 			amountOfJobs: 10,
-			useCounter: func(p safe.ProgressCounter) {
+			useCounter: func(p safe.ResourceManager) {
 				for i := 0; i < 10; i++ {
-					p.Increment()
+					p.FinishJob()
 				}
 				for i := 0; i < 10; i++ {
-					p.Decrement()
+					p.TakeJob()
 				}
 			},
 			validator: func(t *testing.T, count int, total int, todo int) {
@@ -78,9 +78,9 @@ func TestNewProgressCounter(t *testing.T) {
 			name:         "should reset the workerCount",
 			initialValue: 10,
 			amountOfJobs: 10,
-			useCounter: func(p safe.ProgressCounter) {
+			useCounter: func(p safe.ResourceManager) {
 				for i := 0; i < 10; i++ {
-					p.Increment()
+					p.FinishJob()
 				}
 				p.Reset()
 			},
@@ -93,12 +93,12 @@ func TestNewProgressCounter(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			p := safe.NewProgressCounter(test.initialValue, test.amountOfJobs)
+			p := safe.NewResourceManager(test.initialValue, test.amountOfJobs)
 			if test.useCounter != nil {
 				test.useCounter(p)
 			}
 			value := p.GetAvailableWorkers()
-			total := p.GetJobsAccepted()
+			total := p.GetAllJobsAccepted()
 			jobsLeft := p.GetJobsToDo()
 			test.validator(t, value, total, jobsLeft)
 		})

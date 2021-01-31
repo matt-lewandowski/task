@@ -14,9 +14,9 @@ const (
 type Limiter interface {
 	// Stop will close any channels and stop calculating the RPS
 	Stop()
-	// SlotsAvailable will return an integer over a buffered channel of how many requests are
+	// WorkAvailable will return an integer over a buffered channel of how many requests are
 	// allowed to happen
-	SlotsAvailable() chan int
+	WorkAvailable() chan int
 	// Record will record a timestamp that will be used to determine how many slots are available.
 	// Each request that uses an available slot should call request
 	Record(timestamp time.Time)
@@ -69,8 +69,8 @@ func (l *limiter) Stop() {
 	close(l.done)
 }
 
-// SlotsAvailable will return the channel that will receive the amount of jobs ready
-func (l *limiter) SlotsAvailable() chan int {
+// WorkAvailable will return the channel that will receive the amount of jobs ready
+func (l *limiter) WorkAvailable() chan int {
 	return l.jobsReady
 }
 

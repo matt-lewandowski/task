@@ -58,7 +58,7 @@ func main() {
 	// The RateLimit is the maximum amount of new workers being spawned off between each second.
 	// It is important to have more workers then RateLimit if each task might take over 1 second
 	// to process. This example task takes 2 seconds to process
-	task := workers.NewTask(workers.Config{
+	task := workers.NewTask(workers.TaskConfig{
 		Workers:         250,
 		RateLimit:       50,
 		Jobs:            tasks,
