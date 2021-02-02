@@ -1,6 +1,7 @@
 package workers
 
 import (
+	"fmt"
 	"github.com/matt-lewandowski/task/internal/limiter"
 	"github.com/matt-lewandowski/task/internal/limiter/clock"
 	"github.com/matt-lewandowski/task/internal/safe"
@@ -77,7 +78,7 @@ func NewContinuousTask(ct ContinuousTaskConfig) Task {
 		errorHandler:    ct.ErrorHandler,
 		resultHandler:   ct.ResultHandler,
 		jobs:            ct.Jobs,
-		abort:         false,
+		abort:           false,
 	}
 	return &wg
 }
@@ -102,6 +103,7 @@ func (w *cTask) Start() {
 	}
 	flushGroup.Wait()
 	w.limiter.Stop()
+	fmt.Println("I'm done")
 }
 
 func (w *cTask) start(flushGroup *sync.WaitGroup) {
@@ -110,33 +112,27 @@ func (w *cTask) start(flushGroup *sync.WaitGroup) {
 	flushGroup.Add(1)
 	go resultHandler(flushGroup, w.resultsChannel, w.resultHandler)
 
-	workerStops := make(chan bool)
 	waitGroup := sync.WaitGroup{}
 	waitGroup.Add(1)
 
-	go w.work(workerStops, &waitGroup)
+	go w.work(&waitGroup)
 	workersDone := make(chan bool)
 	go func() {
 		waitGroup.Wait()
 		workersDone <- true
-		close(workersDone)
 	}()
 	// Now we wait
 	for {
 		select {
 		case <-w.stop:
 			w.abort = true
-			for i := 0; i < w.workers.GetWorkersWorking(); i++ {
-				workerStops <- true
-			}
-			close(workerStops)
 		case <-workersDone:
 			return
 		}
 	}
 }
 
-func (w *cTask) work(workerStops chan bool, waitGroup *sync.WaitGroup) {
+func (w *cTask) work(waitGroup *sync.WaitGroup) {
 	for !w.abort {
 		numberOfWorkers := <-w.limiter.WorkAvailable()
 		for i := 0; i < numberOfWorkers; i++ {
@@ -144,38 +140,44 @@ func (w *cTask) work(workerStops chan bool, waitGroup *sync.WaitGroup) {
 				w.workers.TakeJob()
 				waitGroup.Add(1)
 				w.limiter.Record(w.clock.Now())
-				go w.receiveJob(waitGroup, workerStops, w.workers.GetAllJobsAccepted())
+				go w.receiveJob(waitGroup, w.workers.GetAllJobsAccepted())
 			}
 		}
 	}
+	w.Stop()
 	waitGroup.Done()
 }
 
-func (w *cTask) receiveJob(waitGroup *sync.WaitGroup, workerStops chan bool, count int) {
+func (w *cTask) receiveJob(waitGroup *sync.WaitGroup, count int) {
 	select {
-	case <-workerStops:
-		w.workers.AbortedJob()
-		waitGroup.Done()
-		return
-	case job := <-w.jobs:
-		if job != nil {
-			result, err := w.handlerFunction(job)
-			if err != nil {
-				w.errorChannel <- JobData{
-					JobValue: job,
-					Error:    err,
-					Count:    count,
+	case job, open := <-w.jobs:
+		if !open {
+			w.abort = true
+			w.workers.AbortedJob()
+		} else {
+			if job != nil {
+				result, err := w.handlerFunction(job)
+				if err != nil {
+					w.errorChannel <- JobData{
+						JobValue: job,
+						Error:    err,
+						Count:    count,
+					}
 				}
-			}
-			if result != nil {
-				w.resultsChannel <- JobData{
-					JobValue: job,
-					Result:   result,
-					Count:    count,
+				if result != nil {
+					w.resultsChannel <- JobData{
+						JobValue: job,
+						Result:   result,
+						Count:    count,
+					}
 				}
+				w.workers.FinishJob()
+			} else {
+				w.workers.AbortedJob()
 			}
 		}
-		waitGroup.Done()
-		w.workers.FinishJob()
+	default:
+		w.workers.AbortedJob()
 	}
+	waitGroup.Done()
 }

@@ -32,12 +32,11 @@ func NewResourceManager(workerCount int, jobCount int) ResourceManager {
 	}
 }
 
-// FinishJob will increment the workerCount and total by 1
+// FinishJob will increment the workerCount by 1
 func (i *manager) FinishJob() {
 	i.mutex.Lock()
 	defer i.mutex.Unlock()
 	i.workerCount++
-	i.jobsAccepted++
 }
 
 // AbortedJob will reverse TakeJob, because the job was never started
@@ -46,6 +45,7 @@ func (i *manager) AbortedJob() {
 	defer i.mutex.Unlock()
 	i.workerCount++
 	i.jobsToDo++
+	i.jobsAccepted--
 }
 
 // TakeJob will subtract 1 from the workerCount
@@ -54,6 +54,7 @@ func (i *manager) TakeJob() {
 	defer i.mutex.Unlock()
 	i.workerCount--
 	i.jobsToDo--
+	i.jobsAccepted++
 }
 
 // Reset will set the workerCount to 0

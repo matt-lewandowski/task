@@ -41,7 +41,7 @@ type limiter struct {
 
 // NewLimiter will return a Limiter interface
 func NewLimiter(c Config) Limiter {
-	done := make(chan bool)
+	done := make(chan bool, 1)
 	jobsReady := make(chan int, 1)
 	l := limiter{
 		mutex:     &sync.Mutex{},
@@ -49,7 +49,6 @@ func NewLimiter(c Config) Limiter {
 		rps:       c.RPS,
 		done:      done,
 		jobsReady: jobsReady,
-		entries:   nil,
 	}
 	l.init()
 	return &l
@@ -65,7 +64,6 @@ func (l *limiter) Record(timestamp time.Time) {
 // Stop will close channels
 func (l *limiter) Stop() {
 	l.done <- true
-	close(l.jobsReady)
 	close(l.done)
 }
 
@@ -80,6 +78,7 @@ func (l *limiter) init() {
 		for {
 			select {
 			case <-l.done:
+				close(l.jobsReady)
 				return
 			case <-ticker.C:
 				l.calculateAllowance()
