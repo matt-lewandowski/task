@@ -98,7 +98,7 @@ func TestNewTask(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			abort := make(chan bool)
+			abort := make(chan bool, 1)
 			resultFunction := func(data JobData) {
 				if data.Count == 10 {
 					abort <- false
@@ -116,7 +116,7 @@ func TestNewTask(t *testing.T) {
 					t.Fatalf("ERROR: %v", data.Error)
 				}
 			}
-			worker := NewTask(Config{
+			worker := NewTask(TaskConfig{
 				Workers:         test.workers,
 				RateLimit:       test.rateLimit,
 				Jobs:            test.jobs,
@@ -126,7 +126,7 @@ func TestNewTask(t *testing.T) {
 			})
 
 			go func() {
-				time.Sleep(time.Second * 1)
+				time.Sleep(time.Second * 2)
 				abort <- true
 			}()
 			go func() {
@@ -171,17 +171,18 @@ func TestTask_Stop(t *testing.T) {
 				}
 			}
 			errorFunction := func(data JobData, stop func()) {}
-			worker := NewTask(Config{
+			worker := NewTask(TaskConfig{
 				Workers:         test.workers,
 				RateLimit:       test.rateLimit,
 				Jobs:            test.jobs,
 				HandlerFunction: test.handlerFunction,
 				ErrorHandler:    errorFunction,
 				ResultHandler:   resultFunction,
+				BufferSize:      100,
 			})
 
 			go func() {
-				time.Sleep(time.Second * 2)
+				time.Sleep(time.Second * 5)
 				abort <- true
 			}()
 			go func() {

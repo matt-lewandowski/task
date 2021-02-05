@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"github.com/matt-lewandowski/task/workers"
-	"time"
 )
 
 func main() {
@@ -25,7 +24,6 @@ func main() {
 	// resulting functions will not be called.
 	workerFunction := func(task interface{}) (interface{}, error) {
 		fmt.Println(fmt.Sprintf("Finished working on %v", task))
-		time.Sleep(2 * time.Second)
 		// For the sake of the example, we a different value to the return function, and an error for the
 		// error function to catch.
 		returnValue := fmt.Sprintf("%v completed", task.(string))
@@ -50,7 +48,7 @@ func main() {
 	// This function is synchronous and it will only handle one result at a time, in the order that the
 	// tasks are resolved.
 	resultFunction := func(result workers.JobData) {
-		fmt.Println(result.Result)
+		fmt.Println(result.Count)
 	}
 
 	// Create a new task with a specified amount of amount workers and an RPS rate limit.
@@ -58,13 +56,14 @@ func main() {
 	// The RateLimit is the maximum amount of new workers being spawned off between each second.
 	// It is important to have more workers then RateLimit if each task might take over 1 second
 	// to process. This example task takes 2 seconds to process
-	task := workers.NewTask(workers.Config{
-		Workers:         250,
-		RateLimit:       50,
+	task := workers.NewTask(workers.TaskConfig{
+		Workers:         100,
+		RateLimit:       100,
 		Jobs:            tasks,
 		HandlerFunction: workerFunction,
 		ErrorHandler:    errorFunction,
 		ResultHandler:   resultFunction,
+		BufferSize:      1000,
 	})
 	task.Start()
 }

@@ -18,8 +18,13 @@ func (_m *Limiter) Record(timestamp time.Time) {
 	_m.Called(timestamp)
 }
 
-// SlotsAvailable provides a mock function with given fields:
-func (_m *Limiter) SlotsAvailable() chan int {
+// Stop provides a mock function with given fields:
+func (_m *Limiter) Stop() {
+	_m.Called()
+}
+
+// WorkAvailable provides a mock function with given fields:
+func (_m *Limiter) WorkAvailable() chan int {
 	ret := _m.Called()
 
 	var r0 chan int
@@ -32,9 +37,4 @@ func (_m *Limiter) SlotsAvailable() chan int {
 	}
 
 	return r0
-}
-
-// Stop provides a mock function with given fields:
-func (_m *Limiter) Stop() {
-	_m.Called()
 }

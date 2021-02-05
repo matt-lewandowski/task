@@ -14,9 +14,9 @@ const (
 type Limiter interface {
 	// Stop will close any channels and stop calculating the RPS
 	Stop()
-	// SlotsAvailable will return an integer over a buffered channel of how many requests are
+	// WorkAvailable will return an integer over a buffered channel of how many requests are
 	// allowed to happen
-	SlotsAvailable() chan int
+	WorkAvailable() chan int
 	// Record will record a timestamp that will be used to determine how many slots are available.
 	// Each request that uses an available slot should call request
 	Record(timestamp time.Time)
@@ -41,7 +41,7 @@ type limiter struct {
 
 // NewLimiter will return a Limiter interface
 func NewLimiter(c Config) Limiter {
-	done := make(chan bool)
+	done := make(chan bool, 1)
 	jobsReady := make(chan int, 1)
 	l := limiter{
 		mutex:     &sync.Mutex{},
@@ -49,7 +49,6 @@ func NewLimiter(c Config) Limiter {
 		rps:       c.RPS,
 		done:      done,
 		jobsReady: jobsReady,
-		entries:   nil,
 	}
 	l.init()
 	return &l
@@ -65,12 +64,11 @@ func (l *limiter) Record(timestamp time.Time) {
 // Stop will close channels
 func (l *limiter) Stop() {
 	l.done <- true
-	close(l.jobsReady)
 	close(l.done)
 }
 
-// SlotsAvailable will return the channel that will receive the amount of jobs ready
-func (l *limiter) SlotsAvailable() chan int {
+// WorkAvailable will return the channel that will receive the amount of jobs ready
+func (l *limiter) WorkAvailable() chan int {
 	return l.jobsReady
 }
 
@@ -80,6 +78,7 @@ func (l *limiter) init() {
 		for {
 			select {
 			case <-l.done:
+				close(l.jobsReady)
 				return
 			case <-ticker.C:
 				l.calculateAllowance()
