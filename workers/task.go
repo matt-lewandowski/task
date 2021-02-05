@@ -73,6 +73,9 @@ type TaskConfig struct {
 	// The ResultHandler is a function that will receive the results from the handler function. A results channel is used to return data to the
 	// result handler, so that workers do not need to wait for the result to be handled before moving on to the next job
 	ResultHandler func(data JobData)
+
+	// The BufferSize is the size of the buffered results and error channels.
+	BufferSize int
 }
 
 // NewTask will return a Task which will process jobs concurrently with the provided handler function
@@ -82,8 +85,8 @@ func NewTask(tc TaskConfig) Task {
 		Clock: clock.NewClock(),
 	})
 	s := make(chan os.Signal)
-	rc := make(chan JobData)
-	ec := make(chan JobData)
+	rc := make(chan JobData, tc.BufferSize)
+	ec := make(chan JobData, tc.BufferSize)
 	pc := safe.NewResourceManager(tc.Workers, len(tc.Jobs))
 	clk := clock.NewClock()
 	signal.Notify(s, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)

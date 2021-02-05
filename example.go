@@ -63,6 +63,7 @@ func main() {
 		HandlerFunction: workerFunction,
 		ErrorHandler:    errorFunction,
 		ResultHandler:   resultFunction,
+		BufferSize:      1000,
 	})
 	task.Start()
 }

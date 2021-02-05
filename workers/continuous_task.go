@@ -1,7 +1,6 @@
 package workers
 
 import (
-	"fmt"
 	"github.com/matt-lewandowski/task/internal/limiter"
 	"github.com/matt-lewandowski/task/internal/limiter/clock"
 	"github.com/matt-lewandowski/task/internal/safe"
@@ -53,6 +52,9 @@ type ContinuousTaskConfig struct {
 	// The ResultHandler is a function that will receive the results from the handler function. A results channel is used to return data to the
 	// result handler, so that workers do not need to wait for the result to be handled before moving on to the next job
 	ResultHandler func(data JobData)
+
+	// The BufferSize is the size of the buffered results and error channels.
+	BufferSize int
 }
 
 // NewContinuousTask will return a ContinuousTask which will process jobs concurrently with the provided handler function
@@ -62,8 +64,8 @@ func NewContinuousTask(ct ContinuousTaskConfig) Task {
 		Clock: clock.NewClock(),
 	})
 	s := make(chan os.Signal)
-	rc := make(chan JobData)
-	ec := make(chan JobData)
+	rc := make(chan JobData, ct.BufferSize)
+	ec := make(chan JobData, ct.BufferSize)
 	pc := safe.NewResourceManager(ct.Workers, 0)
 	clk := clock.NewClock()
 	signal.Notify(s, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
@@ -103,7 +105,6 @@ func (w *cTask) Start() {
 	}
 	flushGroup.Wait()
 	w.limiter.Stop()
-	fmt.Println("I'm done")
 }
 
 func (w *cTask) start(flushGroup *sync.WaitGroup) {

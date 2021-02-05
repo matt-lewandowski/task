@@ -14,16 +14,17 @@ func TestNewProgressCounter(t *testing.T) {
 		initialValue int
 		amountOfJobs int
 		useCounter   func(p safe.ResourceManager)
-		validator    func(t *testing.T, availableWorkers int, totalJobsAccepted int, jobsToDo int)
+		validator    func(t *testing.T, availableWorkers int, totalJobsAccepted int, jobsToDo int, working int)
 	}{
 		{
 			name:         "should create a progress counter with a zero value",
 			initialValue: 0,
 			amountOfJobs: 0,
-			validator: func(t *testing.T, availableWorkers int, totalJobsAccepted int, jobsToDo int) {
+			validator: func(t *testing.T, availableWorkers int, totalJobsAccepted int, jobsToDo int, working int) {
 				assert.Equal(t, availableWorkers, 0)
 				assert.Equal(t, totalJobsAccepted, 0)
 				assert.Equal(t, jobsToDo, 0)
+				assert.Equal(t, working, 0)
 			},
 		},
 		{
@@ -35,10 +36,30 @@ func TestNewProgressCounter(t *testing.T) {
 					p.FinishJob()
 				}
 			},
-			validator: func(t *testing.T, availableWorkers int, totalJobsAccepted int, jobsToDo int) {
+			validator: func(t *testing.T, availableWorkers int, totalJobsAccepted int, jobsToDo int, working int) {
 				assert.Equal(t, availableWorkers, 10)
 				assert.Equal(t, totalJobsAccepted, 0)
 				assert.Equal(t, jobsToDo, 10)
+				assert.Equal(t, working, 10)
+			},
+		},
+		{
+			name:         "should abort the same amount of jobs that were taken",
+			initialValue: 0,
+			amountOfJobs: 10,
+			useCounter: func(p safe.ResourceManager) {
+				for i := 0; i < 10; i++ {
+					p.TakeJob()
+				}
+				for i := 0; i < 10; i++ {
+					p.AbortedJob()
+				}
+			},
+			validator: func(t *testing.T, availableWorkers int, totalJobsAccepted int, jobsToDo int, working int) {
+				assert.Equal(t, availableWorkers, 0)
+				assert.Equal(t, totalJobsAccepted, 0)
+				assert.Equal(t, jobsToDo, 10)
+				assert.Equal(t, working, 0)
 			},
 		},
 		{
@@ -50,10 +71,11 @@ func TestNewProgressCounter(t *testing.T) {
 					p.TakeJob()
 				}
 			},
-			validator: func(t *testing.T, availableWorkers int, totalJobsAccepted int, jobsToDo int) {
+			validator: func(t *testing.T, availableWorkers int, totalJobsAccepted int, jobsToDo int, working int) {
 				assert.Equal(t, availableWorkers, 0)
 				assert.Equal(t, totalJobsAccepted, 10)
 				assert.Equal(t, jobsToDo, 0)
+				assert.Equal(t, working, -10)
 			},
 		},
 		{
@@ -68,10 +90,11 @@ func TestNewProgressCounter(t *testing.T) {
 					p.TakeJob()
 				}
 			},
-			validator: func(t *testing.T, availableWorkers int, totalJobsAccepted int, jobsToDo int) {
+			validator: func(t *testing.T, availableWorkers int, totalJobsAccepted int, jobsToDo int, working int) {
 				assert.Equal(t, availableWorkers, 0)
 				assert.Equal(t, totalJobsAccepted, 10)
 				assert.Equal(t, jobsToDo, 0)
+				assert.Equal(t, working, -10)
 			},
 		},
 		{
@@ -84,10 +107,11 @@ func TestNewProgressCounter(t *testing.T) {
 				}
 				p.Reset()
 			},
-			validator: func(t *testing.T, availableWorkers int, totalJobsAccepted int, jobsToDo int) {
+			validator: func(t *testing.T, availableWorkers int, totalJobsAccepted int, jobsToDo int, working int) {
 				assert.Equal(t, availableWorkers, 0)
 				assert.Equal(t, totalJobsAccepted, 0)
 				assert.Equal(t, jobsToDo, 10)
+				assert.Equal(t, working, 0)
 			},
 		},
 	}
@@ -100,7 +124,8 @@ func TestNewProgressCounter(t *testing.T) {
 			availableWorkers := p.GetAvailableWorkers()
 			totalJobsAccepted := p.GetAllJobsAccepted()
 			jobsToDo := p.GetJobsToDo()
-			test.validator(t, availableWorkers, totalJobsAccepted, jobsToDo)
+			workersWorking := p.GetWorkersWorking()
+			test.validator(t, availableWorkers, totalJobsAccepted, jobsToDo, workersWorking)
 		})
 	}
 }
