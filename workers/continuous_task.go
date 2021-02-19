@@ -53,7 +53,8 @@ type ContinuousTaskConfig struct {
 	// result handler, so that workers do not need to wait for the result to be handled before moving on to the next job
 	ResultHandler func(data JobData)
 
-	// The BufferSize is the size of the buffered results and error channels.
+	// The BufferSize is the size of the buffered results and error channels. It is recommended to set a buffer if you do not want the results channel to
+	// block workers from moving on to a new job
 	BufferSize int
 }
 
