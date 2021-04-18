@@ -1,13 +1,14 @@
 package workers
 
 import (
-	"github.com/matt-lewandowski/task/internal/limiter"
-	"github.com/matt-lewandowski/task/internal/limiter/clock"
-	"github.com/matt-lewandowski/task/internal/safe"
 	"os"
 	"os/signal"
 	"sync"
 	"syscall"
+
+	"github.com/matt-lewandowski/task/internal/limiter"
+	"github.com/matt-lewandowski/task/internal/limiter/clock"
+	"github.com/matt-lewandowski/task/internal/safe"
 )
 
 // Task is the interface for the task runner
@@ -133,7 +134,7 @@ func (w *task) start(flushGroup *sync.WaitGroup) {
 	flushGroup.Add(1)
 	go resultHandler(flushGroup, w.resultsChannel, w.resultHandler)
 
-	workerStops := make(chan bool, w.workers.GetAvailableWorkers())
+	workerStops := make(chan bool, w.workers.GetTotalWorkers()+1)
 	waitGroup := sync.WaitGroup{}
 	waitGroup.Add(1)
 	go w.work(workerStops, &waitGroup)
@@ -146,16 +147,13 @@ func (w *task) start(flushGroup *sync.WaitGroup) {
 	// Now we wait
 	for {
 		select {
-		case <-w.stop:
-			for {
-				select {
-				case workerStops <- true:
-				}
-				break
-			}
 		case <-workersDone:
 			close(workerStops)
 			return
+		case <-w.stop:
+			for i := 0; i < w.workers.GetTotalWorkers()+1; i++ {
+				workerStops <- true
+			}
 		}
 	}
 }
@@ -172,15 +170,21 @@ func (w *task) loadJobs(jobs []interface{}) {
 
 func (w *task) work(workerStops chan bool, waitGroup *sync.WaitGroup) {
 	count := 0
-	for len(w.jobs) > 0 && len(workerStops) == 0 {
+	for len(w.jobs) > 0 {
 		numberOfJobs := <-w.limiter.WorkAvailable()
 		for i := 0; i < numberOfJobs; i++ {
-			if w.workers.GetAvailableWorkers() > 0 && w.workers.GetJobsToDo() > 0 && len(workerStops) == 0 {
-				w.workers.TakeJob()
-				waitGroup.Add(1)
-				w.limiter.Record(w.clock.Now())
-				count++
-				go w.receiveJob(waitGroup, workerStops, count)
+			select {
+			case <-workerStops:
+				waitGroup.Done()
+				return
+			default:
+				if w.workers.GetAvailableWorkers() > 0 && w.workers.GetJobsToDo() > 0 {
+					w.workers.TakeJob()
+					waitGroup.Add(1)
+					w.limiter.Record(w.clock.Now())
+					count++
+					go w.receiveJob(waitGroup, workerStops, count)
+				}
 			}
 		}
 	}
@@ -189,6 +193,9 @@ func (w *task) work(workerStops chan bool, waitGroup *sync.WaitGroup) {
 
 func (w *task) receiveJob(waitGroup *sync.WaitGroup, workerStops chan bool, count int) {
 	select {
+	case <-workerStops:
+		waitGroup.Done()
+		return
 	case job := <-w.jobs:
 		if job != nil {
 			result, err := w.handlerFunction(job)
@@ -209,9 +216,6 @@ func (w *task) receiveJob(waitGroup *sync.WaitGroup, workerStops chan bool, coun
 		}
 		waitGroup.Done()
 		w.workers.FinishJob()
-	case <-workerStops:
-		waitGroup.Done()
-		return
 	}
 }
 
