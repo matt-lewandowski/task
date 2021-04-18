@@ -13,10 +13,12 @@ type ResourceManager interface {
 	GetWorkersWorking() int
 	GetAllJobsAccepted() int
 	GetJobsToDo() int
+	GetTotalWorkers() int
 }
 
 type manager struct {
 	mutex        sync.Mutex
+	totalWorkers int
 	workerCount  int
 	jobsAccepted int
 	jobsToDo     int
@@ -26,6 +28,7 @@ type manager struct {
 func NewResourceManager(workerCount int, jobCount int) ResourceManager {
 	return &manager{
 		mutex:        sync.Mutex{},
+		totalWorkers: workerCount,
 		workerCount:  workerCount,
 		jobsAccepted: 0,
 		jobsToDo:     jobCount,
@@ -92,4 +95,10 @@ func (i *manager) GetWorkersWorking() int {
 	i.mutex.Lock()
 	defer i.mutex.Unlock()
 	return i.workerCount - i.jobsAccepted
+}
+
+// GetTotalWorkers will return the amount of workers that there are in total
+// both working and not working
+func (i *manager) GetTotalWorkers() int {
+	return i.totalWorkers
 }
