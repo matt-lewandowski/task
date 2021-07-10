@@ -22,6 +22,8 @@ type cTask struct {
 	errorChannel    chan JobData
 	resultsChannel  chan JobData
 	stop            chan os.Signal
+	ctx             context.Context
+	cancelCtx       context.CancelFunc
 	clock           clock.Clock
 }
 
@@ -65,7 +67,7 @@ func NewContinuousTask(ct ContinuousTaskConfig) Task {
 		RPS:   ct.RateLimit,
 		Clock: clock.NewClock(),
 	})
-	s := make(chan os.Signal)
+	s := make(chan os.Signal, 1)
 	rc := make(chan JobData, ct.BufferSize)
 	ec := make(chan JobData, ct.BufferSize)
 	pc := safe.NewResourceManager(ct.Workers, 0)
@@ -90,13 +92,18 @@ func NewContinuousTask(ct ContinuousTaskConfig) Task {
 func (w *cTask) Stop() {
 	select {
 	case <-w.stop:
+		w.cancelCtx()
 	default:
-		close(w.stop)
+		w.cancelCtx()
 	}
 }
 
 // Start will begin processing the jobs provided
-func (w *cTask) Start() {
+func (w *cTask) Start(ctx context.Context) {
+	notContext, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	w.cancelCtx = cancel
+	w.ctx = notContext
+
 	flushGroup := sync.WaitGroup{}
 	done := make(chan bool)
 	go func() {
@@ -129,7 +136,7 @@ func (w *cTask) work(waitGroup *sync.WaitGroup) {
 	defer waitGroup.Done()
 	for {
 		select {
-		case <-w.stop:
+		case <-w.ctx.Done():
 			return
 		default:
 			numberOfWorkers := <-w.limiter.WorkAvailable()
@@ -148,13 +155,12 @@ func (w *cTask) work(waitGroup *sync.WaitGroup) {
 func (w *cTask) receiveJob(waitGroup *sync.WaitGroup, count int) {
 	defer waitGroup.Done()
 	select {
-	case <-w.stop:
+	case <-w.ctx.Done():
 		w.workers.AbortedJob()
 	case job, open := <-w.jobs:
 		if !open {
 			w.workers.AbortedJob()
 			w.Stop()
-			return
 		} else {
 			if job != nil {
 				w.handleJob(job, count)
@@ -171,27 +177,21 @@ func (w *cTask) receiveJob(waitGroup *sync.WaitGroup, count int) {
 // handleJob will send a job to the handler function, returning the results to the appropriate channels.
 // It also takes care of cancelling any in flight jobs
 func (w *cTask) handleJob(job interface{}, count int) {
-	ctx, cancel := context.WithCancel(context.Background())
+	childContext, _ := context.WithCancel(w.ctx)
 	innerDone := make(chan interface{})
 	go func() {
-		result, err := w.handlerFunction(ctx, job)
-		if err != nil {
-			select {
-			case <-ctx.Done():
-				return
-			default:
+		result, err := w.handlerFunction(childContext, job)
+		select {
+		case <-w.ctx.Done():
+		default:
+			if err != nil {
 				w.errorChannel <- JobData{
 					JobValue: job,
 					Error:    err,
 					Count:    count,
 				}
 			}
-		}
-		if result != nil {
-			select {
-			case <-ctx.Done():
-				return
-			default:
+			if result != nil {
 				w.resultsChannel <- JobData{
 					JobValue: job,
 					Result:   result,
@@ -201,9 +201,5 @@ func (w *cTask) handleJob(job interface{}, count int) {
 		}
 		close(innerDone)
 	}()
-	select {
-	case <-w.stop:
-		cancel()
-	case <-innerDone:
-	}
+	<-innerDone
 }

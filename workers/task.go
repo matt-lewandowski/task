@@ -1,6 +1,7 @@
 package workers
 
 import (
+	"context"
 	"os"
 	"os/signal"
 	"sync"
@@ -13,7 +14,7 @@ import (
 
 // Task is the interface for the task runner
 type Task interface {
-	Start()
+	Start(ctx context.Context)
 	Stop()
 }
 
@@ -43,6 +44,8 @@ type task struct {
 	resultsChannel  chan JobData
 	stop            chan os.Signal
 	clock           clock.Clock
+	ctx             context.Context
+	cancelCtx       context.CancelFunc
 }
 
 // TaskConfig is the struct for creating a new task runner. A task runner will perform a set of tasks once,
@@ -112,7 +115,7 @@ func (w *task) Stop() {
 }
 
 // Start will begin processing the jobs provided
-func (w *task) Start() {
+func (w *task) Start(ctx context.Context) {
 	flushGroup := sync.WaitGroup{}
 	done := make(chan bool)
 	go func() {

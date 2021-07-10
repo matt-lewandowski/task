@@ -1,6 +1,7 @@
 package workers
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -130,7 +131,7 @@ func TestNewTask(t *testing.T) {
 				abort <- true
 			}()
 			go func() {
-				worker.Start()
+				worker.Start(context.Background())
 				abort <- false
 			}()
 
@@ -186,7 +187,7 @@ func TestTask_Stop(t *testing.T) {
 				abort <- true
 			}()
 			go func() {
-				worker.Start()
+				worker.Start(context.Background())
 				abort <- false
 			}()
 			worker.Stop()

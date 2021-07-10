@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"github.com/matt-lewandowski/task/workers"
 )
@@ -65,5 +66,5 @@ func main() {
 		ResultHandler:   resultFunction,
 		BufferSize:      1000,
 	})
-	task.Start()
+	task.Start(context.Background())
 }

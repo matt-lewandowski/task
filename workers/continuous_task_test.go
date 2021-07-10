@@ -71,7 +71,7 @@ func TestNewContinuousTask(t *testing.T) {
 			})
 			close(jobsChannel)
 			go func() {
-				continousTask.Start()
+				continousTask.Start(context.Background())
 				finish <- true
 			}()
 
@@ -133,7 +133,7 @@ func TestNewContinuousTaskStopping(t *testing.T) {
 				BufferSize:      100,
 			})
 			go func() {
-				continousTask.Start()
+				continousTask.Start(context.Background())
 				abort <- false
 			}()
 			go func() {
