@@ -26,7 +26,7 @@ func TestNewTask(t *testing.T) {
 		{
 			name:      "stop the job from the error handler",
 			jobs:      createJobs("Cancel Me"),
-			workers:   20,
+			workers:   2,
 			rateLimit: 100,
 			handlerFunction: func(i interface{}) (interface{}, error) {
 				return i, fmt.Errorf(i.(string))

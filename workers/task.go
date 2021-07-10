@@ -117,7 +117,7 @@ func (w *task) Start() {
 	done := make(chan bool)
 	go func() {
 		w.start(&flushGroup)
-		done <- true
+		close(done)
 	}()
 	select {
 	case <-done:
@@ -134,25 +134,26 @@ func (w *task) start(flushGroup *sync.WaitGroup) {
 	flushGroup.Add(1)
 	go resultHandler(flushGroup, w.resultsChannel, w.resultHandler)
 
-	workerStops := make(chan bool, w.workers.GetTotalWorkers()+1)
+	stopChannel := make(chan bool, 1)
 	waitGroup := sync.WaitGroup{}
 	waitGroup.Add(1)
-	go w.work(workerStops, &waitGroup)
+	go w.work(stopChannel, &waitGroup)
 	workersDone := make(chan bool)
 	go func() {
 		waitGroup.Wait()
-		workersDone <- true
 		close(workersDone)
 	}()
 	// Now we wait
 	for {
 		select {
 		case <-workersDone:
-			close(workerStops)
 			return
 		case <-w.stop:
-			for i := 0; i < w.workers.GetTotalWorkers()+1; i++ {
-				workerStops <- true
+			// closes stop channel one time
+			select {
+			case <-stopChannel:
+			default:
+				close(stopChannel)
 			}
 		}
 	}
@@ -192,43 +193,47 @@ func (w *task) work(workerStops chan bool, waitGroup *sync.WaitGroup) {
 }
 
 func (w *task) receiveJob(waitGroup *sync.WaitGroup, workerStops chan bool, count int) {
+	defer waitGroup.Done()
 	select {
 	case <-workerStops:
-		waitGroup.Done()
+		w.workers.AbortedJob()
 		return
 	case job := <-w.jobs:
-		if job != nil {
-			result, err := w.handlerFunction(job)
-			if err != nil {
-				w.errorChannel <- JobData{
-					JobValue: job,
-					Error:    err,
-					Count:    count,
-				}
-			}
-			if result != nil {
-				w.resultsChannel <- JobData{
-					JobValue: job,
-					Result:   result,
-					Count:    count,
-				}
+		result, err := w.handlerFunction(job)
+		if err != nil {
+			w.errorChannel <- JobData{
+				JobValue: job,
+				Error:    err,
+				Count:    count,
 			}
 		}
-		waitGroup.Done()
+		if result != nil {
+			w.resultsChannel <- JobData{
+				JobValue: job,
+				Result:   result,
+				Count:    count,
+			}
+		}
 		w.workers.FinishJob()
+	default:
+		w.workers.AbortedJob()
 	}
 }
 
 func errorHandler(wg *sync.WaitGroup, errs chan JobData, stop func(), handler func(data JobData, stop func())) {
 	for err := range errs {
-		handler(err, stop)
+		if handler != nil {
+			handler(err, stop)
+		}
 	}
 	wg.Done()
 }
 
 func resultHandler(wg *sync.WaitGroup, results chan JobData, handler func(data JobData)) {
 	for result := range results {
-		handler(result)
+		if handler != nil {
+			handler(result)
+		}
 	}
 	wg.Done()
 }
