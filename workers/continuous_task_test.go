@@ -1,6 +1,7 @@
 package workers
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -21,7 +22,7 @@ func loadNil(job interface{}, jobChannel chan interface{}, size int) chan interf
 }
 
 func TestNewContinuousTask(t *testing.T) {
-	channelSize := 10
+	channelSize := 9
 
 	t.Parallel()
 	tests := []struct {
@@ -29,16 +30,16 @@ func TestNewContinuousTask(t *testing.T) {
 		jobs            chan interface{}
 		workers         int
 		rateLimit       int
-		handlerFunction func(interface{}) (interface{}, error)
+		handlerFunction func(ctx context.Context, v interface{}) (interface{}, error)
 		errorHandler    func(data JobData, stop func())
 		resultHandler   func(data JobData)
 	}{
 		{
-			name:      "create a job will nil values",
+			name:      "create a job with nil values",
 			jobs:      loadNil(nil, make(chan interface{}, channelSize), channelSize),
 			workers:   10,
 			rateLimit: 10,
-			handlerFunction: func(i interface{}) (interface{}, error) {
+			handlerFunction: func(ctx context.Context, i interface{}) (interface{}, error) {
 				return nil, nil
 			},
 		},
@@ -47,7 +48,7 @@ func TestNewContinuousTask(t *testing.T) {
 			jobs:      loadChannel("result", make(chan interface{}, channelSize), channelSize),
 			workers:   10,
 			rateLimit: 10,
-			handlerFunction: func(i interface{}) (interface{}, error) {
+			handlerFunction: func(ctx context.Context, i interface{}) (interface{}, error) {
 				return i, nil
 			},
 			resultHandler: func(data JobData) {
@@ -58,20 +59,19 @@ func TestNewContinuousTask(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			finish := make(chan bool, 1)
+			jobsChannel := test.jobs
 			continousTask := NewContinuousTask(ContinuousTaskConfig{
 				Workers:         test.workers,
 				RateLimit:       test.rateLimit,
-				Jobs:            test.jobs,
+				Jobs:            jobsChannel,
 				HandlerFunction: test.handlerFunction,
 				ErrorHandler:    test.errorHandler,
 				ResultHandler:   test.resultHandler,
 				BufferSize:      100,
 			})
+			close(jobsChannel)
 			go func() {
-				continousTask.Start()
-			}()
-			go func() {
-				time.Sleep(time.Second * 2)
+				continousTask.Start(context.Background())
 				finish <- true
 			}()
 
@@ -90,7 +90,7 @@ func TestNewContinuousTaskStopping(t *testing.T) {
 		jobs            chan interface{}
 		workers         int
 		rateLimit       int
-		handlerFunction func(interface{}) (interface{}, error)
+		handlerFunction func(ctx context.Context, v interface{}) (interface{}, error)
 		resultHandler   func(data JobData)
 	}{
 		{
@@ -98,7 +98,7 @@ func TestNewContinuousTaskStopping(t *testing.T) {
 			jobs:      loadChannel("stop", make(chan interface{}, channelSize), channelSize),
 			workers:   10,
 			rateLimit: 5,
-			handlerFunction: func(i interface{}) (interface{}, error) {
+			handlerFunction: func(ctx context.Context, i interface{}) (interface{}, error) {
 				return nil, fmt.Errorf(i.(string))
 			},
 		},
@@ -107,7 +107,7 @@ func TestNewContinuousTaskStopping(t *testing.T) {
 			jobs:      loadChannel("close", make(chan interface{}, channelSize), channelSize),
 			workers:   10,
 			rateLimit: 5,
-			handlerFunction: func(i interface{}) (interface{}, error) {
+			handlerFunction: func(ctx context.Context, i interface{}) (interface{}, error) {
 				return nil, fmt.Errorf(i.(string))
 			},
 		},
@@ -133,7 +133,7 @@ func TestNewContinuousTaskStopping(t *testing.T) {
 				BufferSize:      100,
 			})
 			go func() {
-				continousTask.Start()
+				continousTask.Start(context.Background())
 				abort <- false
 			}()
 			go func() {

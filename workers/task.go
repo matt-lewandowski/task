@@ -1,6 +1,7 @@
 package workers
 
 import (
+	"context"
 	"os"
 	"os/signal"
 	"sync"
@@ -13,7 +14,7 @@ import (
 
 // Task is the interface for the task runner
 type Task interface {
-	Start()
+	Start(ctx context.Context)
 	Stop()
 }
 
@@ -36,12 +37,13 @@ type task struct {
 	workers         safe.ResourceManager
 	limiter         limiter.Limiter
 	jobs            chan interface{}
-	handlerFunction func(interface{}) (interface{}, error)
+	handlerFunction func(ctx context.Context, v interface{}) (interface{}, error)
 	errorHandler    func(data JobData, stop func())
 	resultHandler   func(data JobData)
 	errorChannel    chan JobData
 	resultsChannel  chan JobData
-	stop            chan os.Signal
+	ctx             context.Context
+	cancelCtx       context.CancelFunc
 	clock           clock.Clock
 }
 
@@ -64,7 +66,7 @@ type TaskConfig struct {
 
 	// The HandlerFunction will be the function that will be passed a job to handle. If it errors, the error will be passed
 	// through the error channel.
-	HandlerFunction func(interface{}) (interface{}, error)
+	HandlerFunction func(ctx context.Context, v interface{}) (interface{}, error)
 
 	// The ErrorHandler is a function which will receive an error, and a function that can be used to stop job. If stop is called,
 	// Any jobs that are already in progress will finish. An error channel is used to return data to the error handler, so that
@@ -85,19 +87,16 @@ func NewTask(tc TaskConfig) Task {
 		RPS:   tc.RateLimit,
 		Clock: clock.NewClock(),
 	})
-	s := make(chan os.Signal)
 	rc := make(chan JobData, tc.BufferSize)
 	ec := make(chan JobData, tc.BufferSize)
 	pc := safe.NewResourceManager(tc.Workers, len(tc.Jobs))
 	clk := clock.NewClock()
-	signal.Notify(s, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
 	wg := task{
 		workers:         pc,
 		limiter:         l,
 		handlerFunction: tc.HandlerFunction,
 		errorChannel:    ec,
 		resultsChannel:  rc,
-		stop:            s,
 		clock:           clk,
 		errorHandler:    tc.ErrorHandler,
 		resultHandler:   tc.ResultHandler,
@@ -106,13 +105,19 @@ func NewTask(tc TaskConfig) Task {
 	return &wg
 }
 
-// Stop will stop creating new jobs and wait for any jobs in progress to finish
+// Stop will cancel the context, which will stop all requests and return.
 func (w *task) Stop() {
-	w.stop <- os.Interrupt
+	if w.cancelCtx != nil {
+		w.cancelCtx()
+	}
 }
 
 // Start will begin processing the jobs provided
-func (w *task) Start() {
+func (w *task) Start(ctx context.Context) {
+	notContext, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	w.cancelCtx = cancel
+	w.ctx = notContext
+
 	flushGroup := sync.WaitGroup{}
 	done := make(chan bool)
 	go func() {
@@ -134,29 +139,84 @@ func (w *task) start(flushGroup *sync.WaitGroup) {
 	flushGroup.Add(1)
 	go resultHandler(flushGroup, w.resultsChannel, w.resultHandler)
 
-	stopChannel := make(chan bool, 1)
 	waitGroup := sync.WaitGroup{}
 	waitGroup.Add(1)
-	go w.work(stopChannel, &waitGroup)
-	workersDone := make(chan bool)
-	go func() {
-		waitGroup.Wait()
-		close(workersDone)
-	}()
-	// Now we wait
+
+	go w.work(&waitGroup)
+	waitGroup.Wait()
+}
+
+func (w *task) work(waitGroup *sync.WaitGroup) {
+	defer waitGroup.Done()
+	count := 0
 	for {
 		select {
-		case <-workersDone:
+		case <-w.ctx.Done():
 			return
-		case <-w.stop:
-			// closes stop channel one time
-			select {
-			case <-stopChannel:
-			default:
-				close(stopChannel)
+		default:
+			workersAvailable := <-w.limiter.WorkAvailable()
+			for i := 0; i < workersAvailable; i++ {
+				if w.workers.GetAvailableWorkers() > 0 && w.workers.GetJobsToDo() > 0 {
+					w.workers.TakeJob()
+					waitGroup.Add(1)
+					w.limiter.Record(w.clock.Now())
+					count++
+					go w.receiveJob(waitGroup, count)
+				}
 			}
 		}
 	}
+}
+
+func (w *task) receiveJob(waitGroup *sync.WaitGroup, count int) {
+	defer waitGroup.Done()
+	select {
+	case <-w.ctx.Done():
+		w.workers.AbortedJob()
+		return
+	case job, open := <-w.jobs:
+		if !open {
+			w.workers.AbortedJob()
+			w.Stop()
+		} else {
+			if job != nil {
+				w.handleJob(job, count)
+				w.workers.FinishJob()
+			} else {
+				w.workers.AbortedJob()
+			}
+		}
+	default:
+		w.workers.AbortedJob()
+	}
+}
+
+func (w *task) handleJob(job interface{}, count int) {
+	childContext, _ := context.WithCancel(w.ctx)
+	innerDone := make(chan interface{})
+	go func() {
+		result, err := w.handlerFunction(childContext, job)
+		select {
+		case <-w.ctx.Done():
+		default:
+			if err != nil {
+				w.errorChannel <- JobData{
+					JobValue: job,
+					Error:    err,
+					Count:    count,
+				}
+			}
+			if result != nil {
+				w.resultsChannel <- JobData{
+					JobValue: job,
+					Result:   result,
+					Count:    count,
+				}
+			}
+		}
+		close(innerDone)
+	}()
+	<-innerDone
 }
 
 // loadJobs will create a buffered channel containing each job
@@ -169,71 +229,38 @@ func (w *task) loadJobs(jobs []interface{}) {
 	close(w.jobs)
 }
 
-func (w *task) work(workerStops chan bool, waitGroup *sync.WaitGroup) {
-	count := 0
-	for len(w.jobs) > 0 {
-		numberOfJobs := <-w.limiter.WorkAvailable()
-		for i := 0; i < numberOfJobs; i++ {
-			select {
-			case <-workerStops:
-				waitGroup.Done()
-				return
-			default:
-				if w.workers.GetAvailableWorkers() > 0 && w.workers.GetJobsToDo() > 0 {
-					w.workers.TakeJob()
-					waitGroup.Add(1)
-					w.limiter.Record(w.clock.Now())
-					count++
-					go w.receiveJob(waitGroup, workerStops, count)
-				}
-			}
-		}
-	}
-	waitGroup.Done()
-}
-
-func (w *task) receiveJob(waitGroup *sync.WaitGroup, workerStops chan bool, count int) {
-	defer waitGroup.Done()
-	select {
-	case <-workerStops:
-		w.workers.AbortedJob()
-		return
-	case job := <-w.jobs:
-		result, err := w.handlerFunction(job)
-		if err != nil {
-			w.errorChannel <- JobData{
-				JobValue: job,
-				Error:    err,
-				Count:    count,
-			}
-		}
-		if result != nil {
-			w.resultsChannel <- JobData{
-				JobValue: job,
-				Result:   result,
-				Count:    count,
-			}
-		}
-		w.workers.FinishJob()
-	default:
-		w.workers.AbortedJob()
-	}
-}
-
 func errorHandler(wg *sync.WaitGroup, errs chan JobData, stop func(), handler func(data JobData, stop func())) {
-	for err := range errs {
-		if handler != nil {
-			handler(err, stop)
+	defer wg.Done()
+	sChan := make(chan os.Signal, 1)
+	signal.Notify(sChan, syscall.SIGTERM, syscall.SIGINT)
+	for {
+		select {
+		case <-sChan:
+			return
+		case err, ok := <-errs:
+			if ok && handler != nil {
+				handler(err, stop)
+			} else {
+				return
+			}
 		}
 	}
-	wg.Done()
 }
 
 func resultHandler(wg *sync.WaitGroup, results chan JobData, handler func(data JobData)) {
-	for result := range results {
-		if handler != nil {
-			handler(result)
+	defer wg.Done()
+	sChan := make(chan os.Signal, 1)
+	signal.Notify(sChan, syscall.SIGTERM, syscall.SIGINT)
+	for {
+		select {
+		case <-sChan:
+			return
+		case result, ok := <-results:
+			if ok && handler != nil {
+				handler(result)
+			} else {
+				return
+			}
 		}
 	}
-	wg.Done()
 }

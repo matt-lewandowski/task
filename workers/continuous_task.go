@@ -1,26 +1,28 @@
 package workers
 
 import (
-	"github.com/matt-lewandowski/task/internal/limiter"
-	"github.com/matt-lewandowski/task/internal/limiter/clock"
-	"github.com/matt-lewandowski/task/internal/safe"
+	"context"
 	"os"
 	"os/signal"
 	"sync"
 	"syscall"
+
+	"github.com/matt-lewandowski/task/internal/limiter"
+	"github.com/matt-lewandowski/task/internal/limiter/clock"
+	"github.com/matt-lewandowski/task/internal/safe"
 )
 
 type cTask struct {
 	workers         safe.ResourceManager
 	limiter         limiter.Limiter
 	jobs            chan interface{}
-	handlerFunction func(interface{}) (interface{}, error)
+	handlerFunction func(ctx context.Context, v interface{}) (interface{}, error)
 	errorHandler    func(data JobData, stop func())
 	resultHandler   func(data JobData)
 	errorChannel    chan JobData
 	resultsChannel  chan JobData
-	stop            chan os.Signal
-	abort           bool
+	ctx             context.Context
+	cancelCtx       context.CancelFunc
 	clock           clock.Clock
 }
 
@@ -41,8 +43,8 @@ type ContinuousTaskConfig struct {
 	Jobs chan interface{}
 
 	// The HandlerFunction will be the function that will be passed a job to handle. If it errors, the error will be passed
-	// through the error channel.
-	HandlerFunction func(interface{}) (interface{}, error)
+	// through the error channel. The handler function is passed a cancel context
+	HandlerFunction func(ctx context.Context, v interface{}) (interface{}, error)
 
 	// The ErrorHandler is a function which will receive an error, and a function that can be used to stop job. If stop is called,
 	// Any jobs that are already in progress will finish. An error channel is used to return data to the error handler, so that
@@ -64,35 +66,37 @@ func NewContinuousTask(ct ContinuousTaskConfig) Task {
 		RPS:   ct.RateLimit,
 		Clock: clock.NewClock(),
 	})
-	s := make(chan os.Signal)
 	rc := make(chan JobData, ct.BufferSize)
 	ec := make(chan JobData, ct.BufferSize)
 	pc := safe.NewResourceManager(ct.Workers, 0)
 	clk := clock.NewClock()
-	signal.Notify(s, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
 	wg := cTask{
 		workers:         pc,
 		limiter:         l,
 		handlerFunction: ct.HandlerFunction,
 		errorChannel:    ec,
 		resultsChannel:  rc,
-		stop:            s,
 		clock:           clk,
 		errorHandler:    ct.ErrorHandler,
 		resultHandler:   ct.ResultHandler,
 		jobs:            ct.Jobs,
-		abort:           false,
 	}
 	return &wg
 }
 
 // Stop will stop creating new jobs and wait for any jobs in progress to finish
 func (w *cTask) Stop() {
-	w.stop <- os.Interrupt
+	if w.cancelCtx != nil {
+		w.cancelCtx()
+	}
 }
 
 // Start will begin processing the jobs provided
-func (w *cTask) Start() {
+func (w *cTask) Start(ctx context.Context) {
+	notContext, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	w.cancelCtx = cancel
+	w.ctx = notContext
+
 	flushGroup := sync.WaitGroup{}
 	done := make(chan bool)
 	go func() {
@@ -118,61 +122,41 @@ func (w *cTask) start(flushGroup *sync.WaitGroup) {
 	waitGroup.Add(1)
 
 	go w.work(&waitGroup)
-	workersDone := make(chan bool)
-	go func() {
-		waitGroup.Wait()
-		workersDone <- true
-	}()
-	// Now we wait
-	for {
-		select {
-		case <-w.stop:
-			w.abort = true
-		case <-workersDone:
-			return
-		}
-	}
+	waitGroup.Wait()
 }
 
 func (w *cTask) work(waitGroup *sync.WaitGroup) {
-	for !w.abort {
-		numberOfWorkers := <-w.limiter.WorkAvailable()
-		for i := 0; i < numberOfWorkers; i++ {
-			if w.workers.GetAvailableWorkers() > 0 && !w.abort {
-				w.workers.TakeJob()
-				waitGroup.Add(1)
-				w.limiter.Record(w.clock.Now())
-				go w.receiveJob(waitGroup, w.workers.GetAllJobsAccepted())
+	defer waitGroup.Done()
+	for {
+		select {
+		case <-w.ctx.Done():
+			return
+		default:
+			numberOfWorkers := <-w.limiter.WorkAvailable()
+			for i := 0; i < numberOfWorkers; i++ {
+				if w.workers.GetAvailableWorkers() > 0 {
+					w.workers.TakeJob()
+					waitGroup.Add(1)
+					w.limiter.Record(w.clock.Now())
+					go w.receiveJob(waitGroup, w.workers.GetAllJobsAccepted())
+				}
 			}
 		}
 	}
-	w.Stop()
-	waitGroup.Done()
 }
 
 func (w *cTask) receiveJob(waitGroup *sync.WaitGroup, count int) {
+	defer waitGroup.Done()
 	select {
+	case <-w.ctx.Done():
+		w.workers.AbortedJob()
 	case job, open := <-w.jobs:
 		if !open {
-			w.abort = true
 			w.workers.AbortedJob()
+			w.Stop()
 		} else {
 			if job != nil {
-				result, err := w.handlerFunction(job)
-				if err != nil {
-					w.errorChannel <- JobData{
-						JobValue: job,
-						Error:    err,
-						Count:    count,
-					}
-				}
-				if result != nil {
-					w.resultsChannel <- JobData{
-						JobValue: job,
-						Result:   result,
-						Count:    count,
-					}
-				}
+				w.handleJob(job, count)
 				w.workers.FinishJob()
 			} else {
 				w.workers.AbortedJob()
@@ -181,5 +165,34 @@ func (w *cTask) receiveJob(waitGroup *sync.WaitGroup, count int) {
 	default:
 		w.workers.AbortedJob()
 	}
-	waitGroup.Done()
+}
+
+// handleJob will send a job to the handler function, returning the results to the appropriate channels.
+// It also takes care of cancelling any in flight jobs
+func (w *cTask) handleJob(job interface{}, count int) {
+	childContext, _ := context.WithCancel(w.ctx)
+	innerDone := make(chan interface{})
+	go func() {
+		result, err := w.handlerFunction(childContext, job)
+		select {
+		case <-w.ctx.Done():
+		default:
+			if err != nil {
+				w.errorChannel <- JobData{
+					JobValue: job,
+					Error:    err,
+					Count:    count,
+				}
+			}
+			if result != nil {
+				w.resultsChannel <- JobData{
+					JobValue: job,
+					Result:   result,
+					Count:    count,
+				}
+			}
+		}
+		close(innerDone)
+	}()
+	<-innerDone
 }

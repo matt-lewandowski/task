@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"github.com/matt-lewandowski/task/workers"
 )
@@ -22,7 +23,7 @@ func main() {
 	// pass the results/error back and they will be received by the resultFunction and errorFunction. This
 	// is done so the worker can quickly move on to the next job. If nil is passed for either value, the
 	// resulting functions will not be called.
-	workerFunction := func(task interface{}) (interface{}, error) {
+	workerFunction := func(ctx context.Context, task interface{}) (interface{}, error) {
 		fmt.Println(fmt.Sprintf("Finished working on %v", task))
 		// For the sake of the example, we a different value to the return function, and an error for the
 		// error function to catch.
@@ -65,5 +66,5 @@ func main() {
 		ResultHandler:   resultFunction,
 		BufferSize:      1000,
 	})
-	task.Start()
+	task.Start(context.Background())
 }
