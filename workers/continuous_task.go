@@ -21,7 +21,6 @@ type cTask struct {
 	resultHandler   func(data JobData)
 	errorChannel    chan JobData
 	resultsChannel  chan JobData
-	stop            chan os.Signal
 	ctx             context.Context
 	cancelCtx       context.CancelFunc
 	clock           clock.Clock
@@ -67,19 +66,16 @@ func NewContinuousTask(ct ContinuousTaskConfig) Task {
 		RPS:   ct.RateLimit,
 		Clock: clock.NewClock(),
 	})
-	s := make(chan os.Signal, 1)
 	rc := make(chan JobData, ct.BufferSize)
 	ec := make(chan JobData, ct.BufferSize)
 	pc := safe.NewResourceManager(ct.Workers, 0)
 	clk := clock.NewClock()
-	signal.Notify(s, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
 	wg := cTask{
 		workers:         pc,
 		limiter:         l,
 		handlerFunction: ct.HandlerFunction,
 		errorChannel:    ec,
 		resultsChannel:  rc,
-		stop:            s,
 		clock:           clk,
 		errorHandler:    ct.ErrorHandler,
 		resultHandler:   ct.ResultHandler,
@@ -90,10 +86,7 @@ func NewContinuousTask(ct ContinuousTaskConfig) Task {
 
 // Stop will stop creating new jobs and wait for any jobs in progress to finish
 func (w *cTask) Stop() {
-	select {
-	case <-w.stop:
-		w.cancelCtx()
-	default:
+	if w.cancelCtx != nil {
 		w.cancelCtx()
 	}
 }

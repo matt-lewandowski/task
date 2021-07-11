@@ -1,9 +1,10 @@
 package limiter
 
 import (
-	"github.com/matt-lewandowski/task/internal/limiter/clock"
 	"sync"
 	"time"
+
+	"github.com/matt-lewandowski/task/internal/limiter/clock"
 )
 
 const (
@@ -16,7 +17,7 @@ type Limiter interface {
 	Stop()
 	// WorkAvailable will return an integer over a buffered channel of how many requests are
 	// allowed to happen
-	WorkAvailable() chan int
+	WorkAvailable() <- chan int
 	// Record will record a timestamp that will be used to determine how many slots are available.
 	// Each request that uses an available slot should call request
 	Record(timestamp time.Time)
@@ -42,7 +43,7 @@ type limiter struct {
 // NewLimiter will return a Limiter interface
 func NewLimiter(c Config) Limiter {
 	done := make(chan bool, 1)
-	jobsReady := make(chan int, 1)
+	jobsReady := make(chan int)
 	l := limiter{
 		mutex:     &sync.Mutex{},
 		clock:     c.Clock,
@@ -63,12 +64,11 @@ func (l *limiter) Record(timestamp time.Time) {
 
 // Stop will close channels
 func (l *limiter) Stop() {
-	l.done <- true
 	close(l.done)
 }
 
 // WorkAvailable will return the channel that will receive the amount of jobs ready
-func (l *limiter) WorkAvailable() chan int {
+func (l *limiter) WorkAvailable() <- chan int {
 	return l.jobsReady
 }
 
@@ -110,6 +110,14 @@ func (l *limiter) calculateAllowance() {
 
 	rate := l.rps - second
 	if rate > 0 {
-		l.jobsReady <- rate
+		select {
+		// consume old value to update
+		case _, ok := <-l.jobsReady:
+			if ok {
+				l.jobsReady <- rate
+			}
+		default:
+			l.jobsReady <- rate
+		}
 	}
 }

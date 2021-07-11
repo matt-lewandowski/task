@@ -22,14 +22,14 @@ func TestNewTask(t *testing.T) {
 		jobs            []interface{}
 		workers         int
 		rateLimit       int
-		handlerFunction func(interface{}) (interface{}, error)
+		handlerFunction func(ctx context.Context, v interface{}) (interface{}, error)
 	}{
 		{
 			name:      "stop the job from the error handler",
 			jobs:      createJobs("Cancel Me"),
 			workers:   2,
 			rateLimit: 100,
-			handlerFunction: func(i interface{}) (interface{}, error) {
+			handlerFunction: func(ctx context.Context, i interface{}) (interface{}, error) {
 				return i, fmt.Errorf(i.(string))
 			},
 		},
@@ -38,7 +38,7 @@ func TestNewTask(t *testing.T) {
 			jobs:      createJobs(nil),
 			workers:   20,
 			rateLimit: 100,
-			handlerFunction: func(i interface{}) (interface{}, error) {
+			handlerFunction: func(ctx context.Context, i interface{}) (interface{}, error) {
 				return i, nil
 			},
 		},
@@ -47,7 +47,7 @@ func TestNewTask(t *testing.T) {
 			jobs:      createJobs("Test Error"),
 			workers:   20,
 			rateLimit: 100,
-			handlerFunction: func(i interface{}) (interface{}, error) {
+			handlerFunction: func(ctx context.Context, i interface{}) (interface{}, error) {
 				return i, fmt.Errorf(i.(string))
 			},
 		},
@@ -56,7 +56,7 @@ func TestNewTask(t *testing.T) {
 			jobs:      createJobs("string"),
 			workers:   20,
 			rateLimit: 100,
-			handlerFunction: func(i interface{}) (interface{}, error) {
+			handlerFunction: func(ctx context.Context, i interface{}) (interface{}, error) {
 				return i, nil
 			},
 		},
@@ -65,7 +65,7 @@ func TestNewTask(t *testing.T) {
 			jobs:      createJobs(10),
 			workers:   20,
 			rateLimit: 100,
-			handlerFunction: func(i interface{}) (interface{}, error) {
+			handlerFunction: func(ctx context.Context, i interface{}) (interface{}, error) {
 				return i, nil
 			},
 		},
@@ -74,7 +74,7 @@ func TestNewTask(t *testing.T) {
 			jobs:      createJobs('a'),
 			workers:   20,
 			rateLimit: 100,
-			handlerFunction: func(i interface{}) (interface{}, error) {
+			handlerFunction: func(ctx context.Context, i interface{}) (interface{}, error) {
 				return i, nil
 			},
 		},
@@ -83,7 +83,7 @@ func TestNewTask(t *testing.T) {
 			jobs:      createJobs([]string{"string", "string"}),
 			workers:   20,
 			rateLimit: 100,
-			handlerFunction: func(i interface{}) (interface{}, error) {
+			handlerFunction: func(ctx context.Context, i interface{}) (interface{}, error) {
 				return i, nil
 			},
 		},
@@ -92,7 +92,7 @@ func TestNewTask(t *testing.T) {
 			jobs:      createJobs([]chan bool{}),
 			workers:   20,
 			rateLimit: 100,
-			handlerFunction: func(i interface{}) (interface{}, error) {
+			handlerFunction: func(ctx context.Context, i interface{}) (interface{}, error) {
 				return i, nil
 			},
 		},
@@ -151,7 +151,7 @@ func TestTask_Stop(t *testing.T) {
 		jobs            []interface{}
 		workers         int
 		rateLimit       int
-		handlerFunction func(interface{}) (interface{}, error)
+		handlerFunction func(ctx context.Context, v interface{}) (interface{}, error)
 		errorFunction   func(data JobData, stop func())
 	}{
 		{
@@ -159,7 +159,7 @@ func TestTask_Stop(t *testing.T) {
 			jobs:            createJobs("Cancel Me"),
 			workers:         20,
 			rateLimit:       1,
-			handlerFunction: func(i interface{}) (interface{}, error) { return nil, nil },
+			handlerFunction: func(ctx context.Context, i interface{}) (interface{}, error) { return nil, nil },
 			errorFunction:   func(data JobData, stop func()) {},
 		},
 	}
@@ -190,7 +190,11 @@ func TestTask_Stop(t *testing.T) {
 				worker.Start(context.Background())
 				abort <- false
 			}()
-			worker.Stop()
+			go func() {
+				// race condition if we try to call stop before started
+				time.Sleep(1 * time.Second)
+				worker.Stop()
+			}()
 
 			aborted := <-abort
 
