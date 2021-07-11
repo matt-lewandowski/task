@@ -17,7 +17,7 @@ type Limiter interface {
 	Stop()
 	// WorkAvailable will return an integer over a buffered channel of how many requests are
 	// allowed to happen
-	WorkAvailable() <- chan int
+	WorkAvailable() <-chan int
 	// Record will record a timestamp that will be used to determine how many slots are available.
 	// Each request that uses an available slot should call request
 	Record(timestamp time.Time)
@@ -68,7 +68,7 @@ func (l *limiter) Stop() {
 }
 
 // WorkAvailable will return the channel that will receive the amount of jobs ready
-func (l *limiter) WorkAvailable() <- chan int {
+func (l *limiter) WorkAvailable() <-chan int {
 	return l.jobsReady
 }
 

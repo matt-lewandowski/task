@@ -3,7 +3,8 @@
 [![Build Status](https://travis-ci.com/matt-lewandowski/task.svg?branch=main)](https://travis-ci.com/matt-lewandowski/task)
 [![contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat)](https://github.com/dwyl/esta/issues)
 # task
-Task workers are useful for handling large, simple, repetitive jobs concurrently.
+Tasks are useful for handling large, simple, repetitive jobs. <br>
+A Task has a defined amount of workers, which share an RPS rate limit. <br>
 ## Installation
 `go get github.com/matt-lewandowski/task/workers`
 
@@ -12,11 +13,9 @@ Three functions need to be passed in when creating a task worker
 
 - The workerFunction will receive each task, process it, and return the results/error.
 ``` go
-workerFunction := func(task interface{}) (interface{}, error) {
-		fmt.Println(fmt.Sprintf("Finished working on %v", task))
-		returnValue := fmt.Sprintf("%v completed", task.(string))
-		errValue := fmt.Errorf("%v error", returnValue)
-		return returnValue, errValue
+workerFunction := func(ctx context.Context, task interface{}) (interface{}, error) {
+		err, response := someClientRequest(ctx, task.(requestStruct))
+		return response, err
 	}
 ```
 

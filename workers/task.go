@@ -230,19 +230,37 @@ func (w *task) loadJobs(jobs []interface{}) {
 }
 
 func errorHandler(wg *sync.WaitGroup, errs chan JobData, stop func(), handler func(data JobData, stop func())) {
-	for err := range errs {
-		if handler != nil {
-			handler(err, stop)
+	defer wg.Done()
+	sChan := make(chan os.Signal, 1)
+	signal.Notify(sChan, syscall.SIGTERM, syscall.SIGINT)
+	for {
+		select {
+		case <-sChan:
+			return
+		case err, ok := <-errs:
+			if ok && handler != nil {
+				handler(err, stop)
+			} else {
+				return
+			}
 		}
 	}
-	wg.Done()
 }
 
 func resultHandler(wg *sync.WaitGroup, results chan JobData, handler func(data JobData)) {
-	for result := range results {
-		if handler != nil {
-			handler(result)
+	defer wg.Done()
+	sChan := make(chan os.Signal, 1)
+	signal.Notify(sChan, syscall.SIGTERM, syscall.SIGINT)
+	for {
+		select {
+		case <-sChan:
+			return
+		case result, ok := <-results:
+			if ok && handler != nil {
+				handler(result)
+			} else {
+				return
+			}
 		}
 	}
-	wg.Done()
 }
