@@ -110,19 +110,16 @@ func NewTask(tc TaskConfig) Task {
 
 // Stop will cancel the context, which will stop all requests and return.
 func (w *task) Stop() {
-	if w.cancelCtx != nil {
-		select {
-		case <-w.ctx.Done():
-		default:
-			w.cancelCtx()
-		}
+	select {
+	case <-w.ctx.Done():
+	default:
+		w.cancelCtx()
 	}
 }
 
 func (w *task) done() {
 	select {
 	case <-w.doneChan:
-		return
 	default:
 		close(w.doneChan)
 	}
@@ -148,7 +145,7 @@ func (w *task) Start(ctx context.Context) {
 		close(w.errorChannel)
 	}
 	flushGroup.Wait()
-	cancel()
+	w.Stop()
 }
 
 func (w *task) start(flushGroup *sync.WaitGroup) {

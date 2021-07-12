@@ -127,7 +127,7 @@ func (w *cTask) Start(ctx context.Context) {
 		close(w.errorChannel)
 	}
 	flushGroup.Wait()
-	cancel()
+	w.Stop()
 }
 
 func (w *cTask) start(flushGroup *sync.WaitGroup) {
