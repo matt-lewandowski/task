@@ -44,6 +44,7 @@ type task struct {
 	resultsChannel  chan JobData
 	ctx             context.Context
 	cancelCtx       context.CancelFunc
+	doneChan        chan struct{}
 	clock           clock.Clock
 }
 
@@ -87,6 +88,7 @@ func NewTask(tc TaskConfig) Task {
 		RPS:   tc.RateLimit,
 		Clock: clock.NewClock(),
 	})
+	dc := make(chan struct{}, 1)
 	rc := make(chan JobData, tc.BufferSize)
 	ec := make(chan JobData, tc.BufferSize)
 	pc := safe.NewResourceManager(tc.Workers, len(tc.Jobs))
@@ -98,6 +100,7 @@ func NewTask(tc TaskConfig) Task {
 		errorChannel:    ec,
 		resultsChannel:  rc,
 		clock:           clk,
+		doneChan:        dc,
 		errorHandler:    tc.ErrorHandler,
 		resultHandler:   tc.ResultHandler,
 	}
@@ -108,7 +111,20 @@ func NewTask(tc TaskConfig) Task {
 // Stop will cancel the context, which will stop all requests and return.
 func (w *task) Stop() {
 	if w.cancelCtx != nil {
-		w.cancelCtx()
+		select {
+		case <-w.ctx.Done():
+		default:
+			w.cancelCtx()
+		}
+	}
+}
+
+func (w *task) done() {
+	select {
+	case <-w.doneChan:
+		return
+	default:
+		close(w.doneChan)
 	}
 }
 
@@ -117,6 +133,8 @@ func (w *task) Start(ctx context.Context) {
 	notContext, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	w.cancelCtx = cancel
 	w.ctx = notContext
+
+	go w.limiter.Start(notContext)
 
 	flushGroup := sync.WaitGroup{}
 	done := make(chan bool)
@@ -130,14 +148,14 @@ func (w *task) Start(ctx context.Context) {
 		close(w.errorChannel)
 	}
 	flushGroup.Wait()
-	w.limiter.Stop()
+	cancel()
 }
 
 func (w *task) start(flushGroup *sync.WaitGroup) {
 	flushGroup.Add(1)
-	go errorHandler(flushGroup, w.errorChannel, w.Stop, w.errorHandler)
+	go w.sendErrors(flushGroup, w.errorHandler)
 	flushGroup.Add(1)
-	go resultHandler(flushGroup, w.resultsChannel, w.resultHandler)
+	go w.sendResults(flushGroup, w.resultHandler)
 
 	waitGroup := sync.WaitGroup{}
 	waitGroup.Add(1)
@@ -153,15 +171,19 @@ func (w *task) work(waitGroup *sync.WaitGroup) {
 		select {
 		case <-w.ctx.Done():
 			return
+		case <-w.doneChan:
+			return
 		default:
-			workersAvailable := <-w.limiter.WorkAvailable()
-			for i := 0; i < workersAvailable; i++ {
-				if w.workers.GetAvailableWorkers() > 0 && w.workers.GetJobsToDo() > 0 {
-					w.workers.TakeJob()
-					waitGroup.Add(1)
-					w.limiter.Record(w.clock.Now())
-					count++
-					go w.receiveJob(waitGroup, count)
+			workersAvailable, ok := <-w.limiter.WorkAvailable()
+			if ok && workersAvailable > 0 {
+				for i := 0; i < workersAvailable; i++ {
+					if w.workers.GetAvailableWorkers() > 0 && w.workers.GetJobsToDo() > 0 {
+						w.workers.TakeJob()
+						waitGroup.Add(1)
+						w.limiter.Record(w.clock.Now())
+						count++
+						go w.receiveJob(waitGroup, count)
+					}
 				}
 			}
 		}
@@ -174,10 +196,13 @@ func (w *task) receiveJob(waitGroup *sync.WaitGroup, count int) {
 	case <-w.ctx.Done():
 		w.workers.AbortedJob()
 		return
+	case <-w.doneChan:
+		w.workers.AbortedJob()
+		return
 	case job, open := <-w.jobs:
 		if !open {
 			w.workers.AbortedJob()
-			w.Stop()
+			w.done()
 		} else {
 			if job != nil {
 				w.handleJob(job, count)
@@ -229,17 +254,15 @@ func (w *task) loadJobs(jobs []interface{}) {
 	close(w.jobs)
 }
 
-func errorHandler(wg *sync.WaitGroup, errs chan JobData, stop func(), handler func(data JobData, stop func())) {
+func (w *task) sendErrors(wg *sync.WaitGroup, handler func(data JobData, stop func())) {
 	defer wg.Done()
-	sChan := make(chan os.Signal, 1)
-	signal.Notify(sChan, syscall.SIGTERM, syscall.SIGINT)
 	for {
 		select {
-		case <-sChan:
+		case <-w.ctx.Done():
 			return
-		case err, ok := <-errs:
+		case err, ok := <-w.errorChannel:
 			if ok && handler != nil {
-				handler(err, stop)
+				handler(err, w.Stop)
 			} else {
 				return
 			}
@@ -247,15 +270,13 @@ func errorHandler(wg *sync.WaitGroup, errs chan JobData, stop func(), handler fu
 	}
 }
 
-func resultHandler(wg *sync.WaitGroup, results chan JobData, handler func(data JobData)) {
+func (w *task) sendResults(wg *sync.WaitGroup, handler func(data JobData)) {
 	defer wg.Done()
-	sChan := make(chan os.Signal, 1)
-	signal.Notify(sChan, syscall.SIGTERM, syscall.SIGINT)
 	for {
 		select {
-		case <-sChan:
+		case <-w.ctx.Done():
 			return
-		case result, ok := <-results:
+		case result, ok := <-w.resultsChannel:
 			if ok && handler != nil {
 				handler(result)
 			} else {

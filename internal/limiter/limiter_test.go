@@ -4,6 +4,7 @@ import (
 	"github.com/matt-lewandowski/task/internal/limiter"
 	"github.com/matt-lewandowski/task/internal/limiter/mock"
 	"github.com/stretchr/testify/assert"
+	"context"
 	"testing"
 	"time"
 )
@@ -80,6 +81,7 @@ func TestNewLimiter(t *testing.T) {
 				RPS:   test.rps,
 				Clock: &clock,
 			})
+			go l.Start(context.Background())
 			for _, entry := range test.timestamps {
 				l.Record(entry)
 			}
