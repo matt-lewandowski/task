@@ -28,7 +28,7 @@ func TestNewTask(t *testing.T) {
 			name:      "stop the job from the error handler",
 			jobs:      createJobs("Cancel Me"),
 			workers:   2,
-			rateLimit: 100,
+			rateLimit: 200,
 			handlerFunction: func(ctx context.Context, i interface{}) (interface{}, error) {
 				return i, fmt.Errorf(i.(string))
 			},
@@ -127,7 +127,7 @@ func TestNewTask(t *testing.T) {
 			})
 
 			go func() {
-				time.Sleep(time.Second * 2)
+				time.Sleep(time.Second * 5)
 				abort <- true
 			}()
 			go func() {
@@ -192,7 +192,7 @@ func TestTask_Stop(t *testing.T) {
 			}()
 			go func() {
 				// race condition if we try to call stop before started
-				time.Sleep(1 * time.Second)
+				time.Sleep(2 * time.Second)
 				worker.Stop()
 			}()
 

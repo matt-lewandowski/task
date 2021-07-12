@@ -1,6 +1,7 @@
 package limiter
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -21,6 +22,8 @@ type Limiter interface {
 	// Record will record a timestamp that will be used to determine how many slots are available.
 	// Each request that uses an available slot should call request
 	Record(timestamp time.Time)
+	//
+	Start(ctx context.Context)
 }
 
 // The Config is the values needed for creating a limiter
@@ -51,7 +54,6 @@ func NewLimiter(c Config) Limiter {
 		done:      done,
 		jobsReady: jobsReady,
 	}
-	l.init()
 	return &l
 }
 
@@ -72,19 +74,21 @@ func (l *limiter) WorkAvailable() <-chan int {
 	return l.jobsReady
 }
 
-func (l *limiter) init() {
+func (l *limiter) Start(ctx context.Context) {
 	ticker := time.NewTicker(1 * time.Millisecond)
-	go func() {
-		for {
-			select {
-			case <-l.done:
-				close(l.jobsReady)
-				return
-			case <-ticker.C:
-				l.calculateAllowance()
-			}
+	for {
+		select {
+		case <-ctx.Done():
+			close(l.jobsReady)
+			close(l.done)
+			return
+		case <-l.done:
+			close(l.jobsReady)
+			return
+		case <-ticker.C:
+			l.calculateAllowance()
 		}
-	}()
+	}
 }
 
 func (l *limiter) calculateAllowance() {

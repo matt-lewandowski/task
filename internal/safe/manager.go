@@ -100,5 +100,7 @@ func (i *manager) GetWorkersWorking() int {
 // GetTotalWorkers will return the amount of workers that there are in total
 // both working and not working
 func (i *manager) GetTotalWorkers() int {
+	i.mutex.Lock()
+	defer i.mutex.Unlock()
 	return i.totalWorkers
 }
