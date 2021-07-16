@@ -197,10 +197,8 @@ func (w *task) receiveJob(waitGroup *sync.WaitGroup, count int) {
 	select {
 	case <-w.ctx.Done():
 		w.workers.AbortedJob()
-		return
 	case <-w.doneChan:
 		w.workers.AbortedJob()
-		return
 	case job, open := <-w.jobs:
 		if !open {
 			w.workers.AbortedJob()
@@ -219,31 +217,25 @@ func (w *task) receiveJob(waitGroup *sync.WaitGroup, count int) {
 }
 
 func (w *task) handleJob(job interface{}, count int) {
-	childContext, _ := context.WithCancel(w.ctx)
-	innerDone := make(chan interface{})
-	go func() {
-		result, err := w.handlerFunction(childContext, job)
-		select {
-		case <-w.ctx.Done():
-		default:
-			if err != nil {
-				w.errorChannel <- JobData{
-					JobValue: job,
-					Error:    err,
-					Count:    count,
-				}
-			}
-			if result != nil {
-				w.resultsChannel <- JobData{
-					JobValue: job,
-					Result:   result,
-					Count:    count,
-				}
+	result, err := w.handlerFunction(w.ctx, job)
+	select {
+	case <-w.ctx.Done():
+	default:
+		if err != nil {
+			w.errorChannel <- JobData{
+				JobValue: job,
+				Error:    err,
+				Count:    count,
 			}
 		}
-		close(innerDone)
-	}()
-	<-innerDone
+		if result != nil {
+			w.resultsChannel <- JobData{
+				JobValue: job,
+				Result:   result,
+				Count:    count,
+			}
+		}
+	}
 }
 
 // loadJobs will create a buffered channel containing each job
@@ -261,7 +253,16 @@ func (w *task) sendErrors(wg *sync.WaitGroup, handler func(data JobData, stop fu
 	for {
 		select {
 		case <-w.ctx.Done():
-			return
+			for {
+				select {
+				case data := <-w.errorChannel:
+					if data.Error == nil {
+						return
+					}
+				default:
+					return
+				}
+			}
 		case err, ok := <-w.errorChannel:
 			if ok && handler != nil {
 				handler(err, w.Stop)
@@ -277,7 +278,16 @@ func (w *task) sendResults(wg *sync.WaitGroup, handler func(data JobData)) {
 	for {
 		select {
 		case <-w.ctx.Done():
-			return
+			for {
+				select {
+				case data := <-w.resultsChannel:
+					if data.Result == nil {
+						return
+					}
+				default:
+					return
+				}
+			}
 		case result, ok := <-w.resultsChannel:
 			if ok && handler != nil {
 				handler(result)

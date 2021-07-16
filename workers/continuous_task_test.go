@@ -68,7 +68,7 @@ func TestNewContinuousTask(t *testing.T) {
 				HandlerFunction: test.handlerFunction,
 				ErrorHandler:    test.errorHandler,
 				ResultHandler:   test.resultHandler,
-				BufferSize:      100,
+				BufferSize:      10000,
 			})
 			close(jobsChannel)
 			go func() {
@@ -124,14 +124,14 @@ func TestNewContinuousTaskStopping(t *testing.T) {
 		},
 		{
 			name:      "stop the job from the error handler, while jobs are being created",
-			jobs:      loadChannel("stop", make(chan interface{}, 10000), 10000),
-			workers:   4000,
-			rateLimit: 4000,
+			jobs:      loadChannel("stop", make(chan interface{}, 100000), 100000),
+			workers:   40000,
+			rateLimit: 40000,
 			handlerFunction: func(ctx context.Context, i interface{}) (interface{}, error) {
 				return nil, fmt.Errorf(i.(string))
 			},
 			errorHandler: func(data JobData, stop func()) {
-				if strings.Contains(data.Error.Error(), "stop-5000") {
+				if strings.Contains(data.Error.Error(), "stop-50000") {
 					stop()
 				}
 			},
@@ -156,7 +156,7 @@ func TestNewContinuousTaskStopping(t *testing.T) {
 				HandlerFunction: test.handlerFunction,
 				ErrorHandler:    test.errorHandler,
 				ResultHandler:   test.resultHandler,
-				BufferSize:      100,
+				BufferSize:      10000,
 			})
 			close(test.jobs)
 			go func() {

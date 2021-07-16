@@ -161,8 +161,8 @@ func (w *cTask) work(waitGroup *sync.WaitGroup) {
 					default:
 						if w.workers.GetAvailableWorkers() > 0 {
 							w.workers.TakeJob()
-							waitGroup.Add(1)
 							w.limiter.Record(w.clock.Now())
+							waitGroup.Add(1)
 							go w.receiveJob(waitGroup, w.workers.GetAllJobsAccepted())
 						}
 					}
@@ -200,31 +200,25 @@ func (w *cTask) receiveJob(waitGroup *sync.WaitGroup, count int) {
 // handleJob will send a job to the handler function, returning the results to the appropriate channels.
 // It also takes care of cancelling any in flight jobs
 func (w *cTask) handleJob(job interface{}, count int) {
-	childContext, _ := context.WithCancel(w.ctx)
-	innerDone := make(chan interface{})
-	go func() {
-		result, err := w.handlerFunction(childContext, job)
-		select {
-		case <-w.ctx.Done():
-		default:
-			if err != nil {
-				w.errorChannel <- JobData{
-					JobValue: job,
-					Error:    err,
-					Count:    count,
-				}
-			}
-			if result != nil {
-				w.resultsChannel <- JobData{
-					JobValue: job,
-					Result:   result,
-					Count:    count,
-				}
+	result, err := w.handlerFunction(w.ctx, job)
+	select {
+	case <-w.ctx.Done():
+	default:
+		if err != nil {
+			w.errorChannel <- JobData{
+				JobValue: job,
+				Error:    err,
+				Count:    count,
 			}
 		}
-		close(innerDone)
-	}()
-	<-innerDone
+		if result != nil {
+			w.resultsChannel <- JobData{
+				JobValue: job,
+				Result:   result,
+				Count:    count,
+			}
+		}
+	}
 }
 
 func (w *cTask) sendErrors(wg *sync.WaitGroup, handler func(data JobData, stop func())) {
@@ -232,7 +226,16 @@ func (w *cTask) sendErrors(wg *sync.WaitGroup, handler func(data JobData, stop f
 	for {
 		select {
 		case <-w.ctx.Done():
-			return
+			for {
+				select {
+				case data := <-w.errorChannel:
+					if data.Error == nil {
+						return
+					}
+				default:
+					return
+				}
+			}
 		case err, ok := <-w.errorChannel:
 			if ok && handler != nil {
 				handler(err, w.Stop)
@@ -248,7 +251,16 @@ func (w *cTask) sendResults(wg *sync.WaitGroup, handler func(data JobData)) {
 	for {
 		select {
 		case <-w.ctx.Done():
-			return
+			for {
+				select {
+				case data := <-w.resultsChannel:
+					if data.Result == nil {
+						return
+					}
+				default:
+					return
+				}
+			}
 		case result, ok := <-w.resultsChannel:
 			if ok && handler != nil {
 				handler(result)
