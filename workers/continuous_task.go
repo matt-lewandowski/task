@@ -24,6 +24,7 @@ type cTask struct {
 	ctx             context.Context
 	cancelCtx       context.CancelFunc
 	doneChan        chan struct{}
+	doneLock        *sync.Mutex
 	clock           clock.Clock
 }
 
@@ -63,32 +64,29 @@ type ContinuousTaskConfig struct {
 
 // NewContinuousTask will return a ContinuousTask which will process jobs concurrently with the provided handler function
 func NewContinuousTask(ct ContinuousTaskConfig) Task {
-	l := limiter.NewLimiter(limiter.Config{
-		RPS:   ct.RateLimit,
-		Clock: clock.NewClock(),
-	})
-	dc := make(chan struct{}, 1)
-	rc := make(chan JobData, ct.BufferSize)
-	ec := make(chan JobData, ct.BufferSize)
-	pc := safe.NewResourceManager(ct.Workers, 0)
-	clk := clock.NewClock()
 	wg := cTask{
-		workers:         pc,
-		limiter:         l,
+		jobs:    ct.Jobs,
+		clock:   clock.NewClock(),
+		workers: safe.NewResourceManager(ct.Workers, 0),
+		limiter: limiter.NewLimiter(limiter.Config{
+			RPS:   ct.RateLimit,
+			Clock: clock.NewClock(),
+		}),
 		handlerFunction: ct.HandlerFunction,
-		errorChannel:    ec,
-		resultsChannel:  rc,
-		doneChan:        dc,
-		clock:           clk,
 		errorHandler:    ct.ErrorHandler,
 		resultHandler:   ct.ResultHandler,
-		jobs:            ct.Jobs,
+		errorChannel:    make(chan JobData, ct.BufferSize),
+		resultsChannel:  make(chan JobData, ct.BufferSize),
+		doneChan:        make(chan struct{}, 1),
+		doneLock:        &sync.Mutex{},
 	}
 	return &wg
 }
 
 // Stop will stop creating new jobs and wait for any jobs in progress to finish
 func (w *cTask) Stop() {
+	w.doneLock.Lock()
+	defer w.doneLock.Unlock()
 	if w.cancelCtx != nil {
 		select {
 		case <-w.ctx.Done():
@@ -99,6 +97,8 @@ func (w *cTask) Stop() {
 }
 
 func (w *cTask) done() {
+	w.doneLock.Lock()
+	defer w.doneLock.Unlock()
 	select {
 	case <-w.doneChan:
 		return
@@ -147,7 +147,7 @@ func (w *cTask) work(waitGroup *sync.WaitGroup) {
 	defer waitGroup.Done()
 	for {
 		select {
-		case <- w.doneChan:
+		case <-w.doneChan:
 			return
 		case <-w.ctx.Done():
 			return
@@ -155,11 +155,16 @@ func (w *cTask) work(waitGroup *sync.WaitGroup) {
 			numberOfWorkers, ok := <-w.limiter.WorkAvailable()
 			if ok && numberOfWorkers > 0 {
 				for i := 0; i < numberOfWorkers; i++ {
-					if w.workers.GetAvailableWorkers() > 0 {
-						w.workers.TakeJob()
-						waitGroup.Add(1)
-						w.limiter.Record(w.clock.Now())
-						go w.receiveJob(waitGroup, w.workers.GetAllJobsAccepted())
+					select {
+					case <-w.ctx.Done():
+						return
+					default:
+						if w.workers.GetAvailableWorkers() > 0 {
+							w.workers.TakeJob()
+							waitGroup.Add(1)
+							w.limiter.Record(w.clock.Now())
+							go w.receiveJob(waitGroup, w.workers.GetAllJobsAccepted())
+						}
 					}
 				}
 			}

@@ -45,6 +45,7 @@ type task struct {
 	ctx             context.Context
 	cancelCtx       context.CancelFunc
 	doneChan        chan struct{}
+	doneLock        *sync.Mutex
 	clock           clock.Clock
 }
 
@@ -84,25 +85,20 @@ type TaskConfig struct {
 
 // NewTask will return a Task which will process jobs concurrently with the provided handler function
 func NewTask(tc TaskConfig) Task {
-	l := limiter.NewLimiter(limiter.Config{
-		RPS:   tc.RateLimit,
-		Clock: clock.NewClock(),
-	})
-	dc := make(chan struct{}, 1)
-	rc := make(chan JobData, tc.BufferSize)
-	ec := make(chan JobData, tc.BufferSize)
-	pc := safe.NewResourceManager(tc.Workers, len(tc.Jobs))
-	clk := clock.NewClock()
 	wg := task{
-		workers:         pc,
-		limiter:         l,
+		clock:   clock.NewClock(),
+		workers: safe.NewResourceManager(tc.Workers, len(tc.Jobs)),
+		limiter: limiter.NewLimiter(limiter.Config{
+			RPS:   tc.RateLimit,
+			Clock: clock.NewClock(),
+		}),
 		handlerFunction: tc.HandlerFunction,
-		errorChannel:    ec,
-		resultsChannel:  rc,
-		clock:           clk,
-		doneChan:        dc,
 		errorHandler:    tc.ErrorHandler,
 		resultHandler:   tc.ResultHandler,
+		errorChannel:    make(chan JobData, tc.BufferSize),
+		resultsChannel:  make(chan JobData, tc.BufferSize),
+		doneChan:        make(chan struct{}, 1),
+		doneLock:        &sync.Mutex{},
 	}
 	wg.loadJobs(tc.Jobs)
 	return &wg
@@ -110,6 +106,8 @@ func NewTask(tc TaskConfig) Task {
 
 // Stop will cancel the context, which will stop all requests and return.
 func (w *task) Stop() {
+	w.doneLock.Lock()
+	defer w.doneLock.Unlock()
 	select {
 	case <-w.ctx.Done():
 	default:
@@ -118,6 +116,8 @@ func (w *task) Stop() {
 }
 
 func (w *task) done() {
+	w.doneLock.Lock()
+	defer w.doneLock.Unlock()
 	select {
 	case <-w.doneChan:
 	default:
@@ -174,12 +174,17 @@ func (w *task) work(waitGroup *sync.WaitGroup) {
 			workersAvailable, ok := <-w.limiter.WorkAvailable()
 			if ok && workersAvailable > 0 {
 				for i := 0; i < workersAvailable; i++ {
-					if w.workers.GetAvailableWorkers() > 0 && w.workers.GetJobsToDo() > 0 {
-						w.workers.TakeJob()
-						waitGroup.Add(1)
-						w.limiter.Record(w.clock.Now())
-						count++
-						go w.receiveJob(waitGroup, count)
+					select {
+					case <-w.ctx.Done():
+						return
+					default:
+						if w.workers.GetAvailableWorkers() > 0 && w.workers.GetJobsToDo() > 0 {
+							w.workers.TakeJob()
+							waitGroup.Add(1)
+							w.limiter.Record(w.clock.Now())
+							count++
+							go w.receiveJob(waitGroup, count)
+						}
 					}
 				}
 			}

@@ -1,10 +1,10 @@
 package limiter_test
 
 import (
+	"context"
 	"github.com/matt-lewandowski/task/internal/limiter"
 	"github.com/matt-lewandowski/task/internal/limiter/mock"
 	"github.com/stretchr/testify/assert"
-	"context"
 	"testing"
 	"time"
 )

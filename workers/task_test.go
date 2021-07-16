@@ -17,6 +17,7 @@ func createJobs(job interface{}) []interface{} {
 }
 
 func TestNewTask(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name            string
 		jobs            []interface{}
@@ -28,7 +29,7 @@ func TestNewTask(t *testing.T) {
 			name:      "stop the job from the error handler",
 			jobs:      createJobs("Cancel Me"),
 			workers:   2,
-			rateLimit: 200,
+			rateLimit: 2,
 			handlerFunction: func(ctx context.Context, i interface{}) (interface{}, error) {
 				return i, fmt.Errorf(i.(string))
 			},
@@ -124,6 +125,7 @@ func TestNewTask(t *testing.T) {
 				HandlerFunction: test.handlerFunction,
 				ErrorHandler:    errorFunction,
 				ResultHandler:   resultFunction,
+				BufferSize:      100,
 			})
 
 			go func() {
