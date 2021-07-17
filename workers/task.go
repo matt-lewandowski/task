@@ -265,7 +265,9 @@ func (w *task) sendErrors(wg *sync.WaitGroup, handler func(data JobData, stop fu
 			}
 		case err, ok := <-w.errorChannel:
 			if ok && handler != nil {
-				handler(err, w.Stop)
+				if err.Error != nil {
+					handler(err, w.Stop)
+				}
 			} else {
 				return
 			}
@@ -290,7 +292,9 @@ func (w *task) sendResults(wg *sync.WaitGroup, handler func(data JobData)) {
 			}
 		case result, ok := <-w.resultsChannel:
 			if ok && handler != nil {
-				handler(result)
+				if result.Result != nil {
+					handler(result)
+				}
 			} else {
 				return
 			}
