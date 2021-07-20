@@ -3,6 +3,7 @@ package workers
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -67,7 +68,7 @@ func TestNewContinuousTask(t *testing.T) {
 				HandlerFunction: test.handlerFunction,
 				ErrorHandler:    test.errorHandler,
 				ResultHandler:   test.resultHandler,
-				BufferSize:      100,
+				BufferSize:      10000,
 			})
 			close(jobsChannel)
 			go func() {
@@ -82,7 +83,6 @@ func TestNewContinuousTask(t *testing.T) {
 }
 
 func TestNewContinuousTaskStopping(t *testing.T) {
-	channelSize := 10
 
 	t.Parallel()
 	tests := []struct {
@@ -91,22 +91,56 @@ func TestNewContinuousTaskStopping(t *testing.T) {
 		workers         int
 		rateLimit       int
 		handlerFunction func(ctx context.Context, v interface{}) (interface{}, error)
+		errorHandler    func(data JobData, stop func())
 		resultHandler   func(data JobData)
 	}{
 		{
 			name:      "stop the job from the error handler",
-			jobs:      loadChannel("stop", make(chan interface{}, channelSize), channelSize),
+			jobs:      loadChannel("stop", make(chan interface{}, 10), 10),
 			workers:   10,
-			rateLimit: 5,
+			rateLimit: 2,
 			handlerFunction: func(ctx context.Context, i interface{}) (interface{}, error) {
 				return nil, fmt.Errorf(i.(string))
 			},
+			errorHandler: func(data JobData, stop func()) {
+				if data.Error != nil {
+					stop()
+				}
+			},
 		},
 		{
-			name:      "stop the job from closing the channel",
-			jobs:      loadChannel("close", make(chan interface{}, channelSize), channelSize),
+			name:      "stop the job from the error handler with a lot of jobs",
+			jobs:      loadChannel("stop", make(chan interface{}, 10000), 10000),
+			workers:   1000,
+			rateLimit: 1000,
+			handlerFunction: func(ctx context.Context, i interface{}) (interface{}, error) {
+				return nil, fmt.Errorf(i.(string))
+			},
+			errorHandler: func(data JobData, stop func()) {
+				if data.Error != nil {
+					stop()
+				}
+			},
+		},
+		{
+			name:      "stop the job from the error handler, while jobs are being created",
+			jobs:      loadChannel("stop", make(chan interface{}, 100000), 100000),
+			workers:   40000,
+			rateLimit: 40000,
+			handlerFunction: func(ctx context.Context, i interface{}) (interface{}, error) {
+				return nil, fmt.Errorf(i.(string))
+			},
+			errorHandler: func(data JobData, stop func()) {
+				if strings.Contains(data.Error.Error(), "stop-50000") {
+					stop()
+				}
+			},
+		},
+		{
+			name:      "stop the job when it completes",
+			jobs:      loadChannel("close", make(chan interface{}, 10), 10),
 			workers:   10,
-			rateLimit: 5,
+			rateLimit: 100,
 			handlerFunction: func(ctx context.Context, i interface{}) (interface{}, error) {
 				return nil, fmt.Errorf(i.(string))
 			},
@@ -114,24 +148,17 @@ func TestNewContinuousTaskStopping(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			errorHandler := func(data JobData, stop func()) {
-				switch data.Error.Error() {
-				case "close-1":
-					close(test.jobs)
-				case "stop-1":
-					stop()
-				}
-			}
 			abort := make(chan bool, 1)
 			continousTask := NewContinuousTask(ContinuousTaskConfig{
 				Workers:         test.workers,
 				RateLimit:       test.rateLimit,
 				Jobs:            test.jobs,
 				HandlerFunction: test.handlerFunction,
-				ErrorHandler:    errorHandler,
+				ErrorHandler:    test.errorHandler,
 				ResultHandler:   test.resultHandler,
-				BufferSize:      100,
+				BufferSize:      10000,
 			})
+			close(test.jobs)
 			go func() {
 				continousTask.Start(context.Background())
 				abort <- false

@@ -92,27 +92,7 @@ func (l *limiter) Start(ctx context.Context) {
 }
 
 func (l *limiter) calculateAllowance() {
-	now := l.clock.Now().UnixNano()
-	secondWindow := now - nanosecondsInSecond
-
-	var second int
-	var currentEntries []int64
-
-	l.mutex.Lock()
-	for _, entry := range l.entries {
-		isValid := false
-		if entry > secondWindow {
-			second++
-			isValid = true
-		}
-		if isValid {
-			currentEntries = append(currentEntries, entry)
-		}
-	}
-	l.entries = currentEntries
-	l.mutex.Unlock()
-
-	rate := l.rps - second
+	rate := l.getRate()
 	if rate > 0 {
 		select {
 		// consume old value to update
@@ -124,4 +104,28 @@ func (l *limiter) calculateAllowance() {
 			l.jobsReady <- rate
 		}
 	}
+}
+
+func (l *limiter) getRate() int {
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+	now := l.clock.Now().UnixNano()
+	secondWindow := now - nanosecondsInSecond
+
+	var second int
+	var currentEntries []int64
+
+	for _, entry := range l.entries {
+		isValid := false
+		if entry > secondWindow {
+			second++
+			isValid = true
+		}
+		if isValid {
+			currentEntries = append(currentEntries, entry)
+		}
+	}
+	l.entries = currentEntries
+	rate := l.rps - second
+	return rate
 }

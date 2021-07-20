@@ -24,6 +24,7 @@ type cTask struct {
 	ctx             context.Context
 	cancelCtx       context.CancelFunc
 	doneChan        chan struct{}
+	doneLock        *sync.Mutex
 	clock           clock.Clock
 }
 
@@ -63,32 +64,29 @@ type ContinuousTaskConfig struct {
 
 // NewContinuousTask will return a ContinuousTask which will process jobs concurrently with the provided handler function
 func NewContinuousTask(ct ContinuousTaskConfig) Task {
-	l := limiter.NewLimiter(limiter.Config{
-		RPS:   ct.RateLimit,
-		Clock: clock.NewClock(),
-	})
-	dc := make(chan struct{}, 1)
-	rc := make(chan JobData, ct.BufferSize)
-	ec := make(chan JobData, ct.BufferSize)
-	pc := safe.NewResourceManager(ct.Workers, 0)
-	clk := clock.NewClock()
 	wg := cTask{
-		workers:         pc,
-		limiter:         l,
+		jobs:    ct.Jobs,
+		clock:   clock.NewClock(),
+		workers: safe.NewResourceManager(ct.Workers, 0),
+		limiter: limiter.NewLimiter(limiter.Config{
+			RPS:   ct.RateLimit,
+			Clock: clock.NewClock(),
+		}),
 		handlerFunction: ct.HandlerFunction,
-		errorChannel:    ec,
-		resultsChannel:  rc,
-		doneChan:        dc,
-		clock:           clk,
 		errorHandler:    ct.ErrorHandler,
 		resultHandler:   ct.ResultHandler,
-		jobs:            ct.Jobs,
+		errorChannel:    make(chan JobData, ct.BufferSize),
+		resultsChannel:  make(chan JobData, ct.BufferSize),
+		doneChan:        make(chan struct{}, 1),
+		doneLock:        &sync.Mutex{},
 	}
 	return &wg
 }
 
 // Stop will stop creating new jobs and wait for any jobs in progress to finish
 func (w *cTask) Stop() {
+	w.doneLock.Lock()
+	defer w.doneLock.Unlock()
 	if w.cancelCtx != nil {
 		select {
 		case <-w.ctx.Done():
@@ -99,6 +97,8 @@ func (w *cTask) Stop() {
 }
 
 func (w *cTask) done() {
+	w.doneLock.Lock()
+	defer w.doneLock.Unlock()
 	select {
 	case <-w.doneChan:
 		return
@@ -147,7 +147,7 @@ func (w *cTask) work(waitGroup *sync.WaitGroup) {
 	defer waitGroup.Done()
 	for {
 		select {
-		case <- w.doneChan:
+		case <-w.doneChan:
 			return
 		case <-w.ctx.Done():
 			return
@@ -155,11 +155,16 @@ func (w *cTask) work(waitGroup *sync.WaitGroup) {
 			numberOfWorkers, ok := <-w.limiter.WorkAvailable()
 			if ok && numberOfWorkers > 0 {
 				for i := 0; i < numberOfWorkers; i++ {
-					if w.workers.GetAvailableWorkers() > 0 {
-						w.workers.TakeJob()
-						waitGroup.Add(1)
-						w.limiter.Record(w.clock.Now())
-						go w.receiveJob(waitGroup, w.workers.GetAllJobsAccepted())
+					select {
+					case <-w.ctx.Done():
+						return
+					default:
+						if w.workers.GetAvailableWorkers() > 0 {
+							w.workers.TakeJob()
+							w.limiter.Record(w.clock.Now())
+							waitGroup.Add(1)
+							go w.receiveJob(waitGroup, w.workers.GetAllJobsAccepted())
+						}
 					}
 				}
 			}
@@ -195,31 +200,25 @@ func (w *cTask) receiveJob(waitGroup *sync.WaitGroup, count int) {
 // handleJob will send a job to the handler function, returning the results to the appropriate channels.
 // It also takes care of cancelling any in flight jobs
 func (w *cTask) handleJob(job interface{}, count int) {
-	childContext, _ := context.WithCancel(w.ctx)
-	innerDone := make(chan interface{})
-	go func() {
-		result, err := w.handlerFunction(childContext, job)
-		select {
-		case <-w.ctx.Done():
-		default:
-			if err != nil {
-				w.errorChannel <- JobData{
-					JobValue: job,
-					Error:    err,
-					Count:    count,
-				}
-			}
-			if result != nil {
-				w.resultsChannel <- JobData{
-					JobValue: job,
-					Result:   result,
-					Count:    count,
-				}
+	result, err := w.handlerFunction(w.ctx, job)
+	select {
+	case <-w.ctx.Done():
+	default:
+		if err != nil {
+			w.errorChannel <- JobData{
+				JobValue: job,
+				Error:    err,
+				Count:    count,
 			}
 		}
-		close(innerDone)
-	}()
-	<-innerDone
+		if result != nil {
+			w.resultsChannel <- JobData{
+				JobValue: job,
+				Result:   result,
+				Count:    count,
+			}
+		}
+	}
 }
 
 func (w *cTask) sendErrors(wg *sync.WaitGroup, handler func(data JobData, stop func())) {
@@ -227,10 +226,21 @@ func (w *cTask) sendErrors(wg *sync.WaitGroup, handler func(data JobData, stop f
 	for {
 		select {
 		case <-w.ctx.Done():
-			return
+			for {
+				select {
+				case data := <-w.errorChannel:
+					if data.Error == nil {
+						return
+					}
+				default:
+					return
+				}
+			}
 		case err, ok := <-w.errorChannel:
 			if ok && handler != nil {
-				handler(err, w.Stop)
+				if err.Error != nil {
+					handler(err, w.Stop)
+				}
 			} else {
 				return
 			}
@@ -243,10 +253,21 @@ func (w *cTask) sendResults(wg *sync.WaitGroup, handler func(data JobData)) {
 	for {
 		select {
 		case <-w.ctx.Done():
-			return
+			for {
+				select {
+				case data := <-w.resultsChannel:
+					if data.Result == nil {
+						return
+					}
+				default:
+					return
+				}
+			}
 		case result, ok := <-w.resultsChannel:
 			if ok && handler != nil {
-				handler(result)
+				if result.Result != nil {
+					handler(result)
+				}
 			} else {
 				return
 			}
